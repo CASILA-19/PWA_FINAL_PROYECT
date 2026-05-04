@@ -2,7 +2,7 @@
   "name": "Mascotas",
   "short_name": "Mascotas",
   "description": "Gestión de información de mascotas con soporte offline",
-  "start_url": "/",
+  "start_url": "/login.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#198754",

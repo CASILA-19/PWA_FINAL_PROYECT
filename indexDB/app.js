@@ -144,6 +144,19 @@ class SyncManager {
 }
 
 addEventListener('DOMContentLoaded', () => {
+    // PROTECCIÓN DE RUTA: Verificar autenticación
+    const usuarioActual = getCurrentUser();
+    if (!usuarioActual) {
+        window.location.href = '/login.html';
+        return;
+    }
+    
+    // Mostrar información del usuario
+    const userInfo = document.getElementById('userInfo');
+    if (userInfo) {
+        userInfo.textContent = `Bienvenido, ${usuarioActual.nombres}`;
+    }
+    
     const dbName = 'mascotasDB';
     db = new PouchDB(dbName);
     syncManager = new SyncManager(db);

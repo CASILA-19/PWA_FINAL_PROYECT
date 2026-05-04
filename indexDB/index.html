@@ -16,8 +16,10 @@
                 Mascotas
             </a>
             <div class="ms-auto d-flex align-items-center gap-2">
+                <span id="userInfo" class="text-muted me-2"></span>
                 <span id="syncStatus" class="badge bg-secondary ms-2">Comprobando...</span>
                 <button id="btnSync" class="btn btn-sm btn-outline-primary" onclick="syncManager.sync()">Sincronizar</button>
+                <button id="btnLogout" class="btn btn-sm btn-outline-danger" onclick="logout()">Cerrar Sesión</button>
             </div>
         </div>
     </nav>
@@ -51,6 +53,7 @@
         </table>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/pouchdb@9.0.0/dist/pouchdb.min.js"></script>
+    <script src="utils.js"></script>
     <script src="app.js"></script>
     <script>
       if ('serviceWorker' in navigator) {

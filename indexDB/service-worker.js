@@ -4,7 +4,12 @@ const API_CACHE_NAME = 'mascotas-api-v1';
 const APP_SHELL = [
   '/',
   '/index.html',
+  '/login.html',
+  '/registro.html',
   '/app.js',
+  '/login.js',
+  '/registro.js',
+  '/utils.js',
   'https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css',
   'https://cdn.jsdelivr.net/npm/pouchdb@9.0.0/dist/pouchdb.min.js'
 ];
