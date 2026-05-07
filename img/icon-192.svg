@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="40" fill="#0062FF"/>
+  <!-- Pata central -->
+  <ellipse cx="96" cy="108" rx="28" ry="24" fill="#fff"/>
+  <!-- Dedos -->
+  <circle cx="72" cy="80" r="16" fill="#fff"/>
+  <circle cx="120" cy="80" r="16" fill="#fff"/>
+  <circle cx="55" cy="100" r="13" fill="#fff"/>
+  <circle cx="137" cy="100" r="13" fill="#fff"/>
+</svg>
