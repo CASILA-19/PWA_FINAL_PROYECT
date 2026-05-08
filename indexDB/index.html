@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0062ff">
+    <link rel="manifest" href="/manifest.json">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <title>Dashboard - Mascotas</title>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-success">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <img src="assets/img/logo.jpg" alt="Logo" width="30" height="24" class="d-inline-block align-text-top">
+                Mascotas PWA
+            </a>
+            <div class="ms-auto d-flex align-items-center gap-2">
+                <span id="userInfo" class="text-white me-2"></span>
+                <button class="btn btn-sm btn-outline-light" onclick="logout()">
+                    <i class="bi bi-box-arrow-right"></i> Salir
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h2 id="welcomeMessage" class="mb-4"></h2>
+            </div>
+        </div>
+
+        <!-- Opciones principales -->
+        <div class="row g-3" id="mainOptions">
+            <!-- Se llenarán dinámicamente según el rol -->
+        </div>
+
+        <!-- Sección de estadísticas (solo ADMIN) -->
+        <div id="estadisticasSection" class="mt-4 d-none">
+            <h3>Estadísticas Globales</h3>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <h5 class="card-title">Total Censos</h5>
+                            <p class="card-text display-4" id="totalCensos">0</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <h5 class="card-title">Total Mascotas</h5>
+                            <p class="card-text display-4" id="totalMascotas">0</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <h5 class="card-title">Total Dueños</h5>
+                            <p class="card-text display-4" id="totalDuenos">0</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <h5 class="card-title">Encuestadores</h5>
+                            <p class="card-text display-4" id="totalEncuestadores">0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/config.js"></script>
+    <script src="assets/js/app.js"></script>
+</body>
+</html>

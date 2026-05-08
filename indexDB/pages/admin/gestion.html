@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <title>Gestión de Datos</title>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-success">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="../../index.html">
+                <i class="bi bi-arrow-left"></i> Volver
+            </a>
+            <span class="navbar-text text-white">Gestión de Dueños y Mascotas</span>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Tabs -->
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#duenos">
+                    <i class="bi bi-people"></i> Dueños
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#mascotas">
+                    <i class="bi bi-heart"></i> Mascotas
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content mt-3">
+            <!-- Tab Dueños -->
+            <div class="tab-pane fade show active" id="duenos">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Lista de Dueños</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="duenosContainer">
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-primary"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Mascotas -->
+            <div class="tab-pane fade" id="mascotas">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Lista de Mascotas</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="mascotasContainer">
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-primary"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="../../assets/js/config.js"></script>
+    <script src="../../assets/js/gestion.js"></script>
+</body>
+</html>
