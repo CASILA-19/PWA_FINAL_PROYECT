@@ -1,5 +1,5 @@
 /**
- * app.js — Lógica principal: CRUD de mascotas + sincronización offline (PouchDB)
+ * app.js — Lógica principal: CRUD de mascotas + sincronización offline (PouchDB) ok
  */
 
 const API_URL = 'http://localhost:3303/mascota';
