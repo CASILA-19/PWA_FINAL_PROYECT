@@ -1,12 +1,15 @@
 /**
- * app.js — Lógica principal: CRUD de mascotas + sincronización offline (PouchDB) ok
+ * app.js — Lógica principal: CRUD de mascotas + sincronización offline (PouchDB)
  */
 
-const API_URL = 'http://localhost:3303/mascota';
+const API_URL = 'https://elprofehugo.online/';
 
 let db;
 let syncManager;
 let mascotaEnEdicionId = null;
+let swReg = null;
+let btnActivada = null;
+let btnDesactivada = null;
 
 /* =============================================
    Utilidad: Toast de notificaciones
@@ -165,14 +168,167 @@ class SyncManager {
 }
 
 /* =============================================
+   Notificaciones Push
+   ============================================= */
+
+function verificarSuscripcion(activadas) {
+    const statusBadge = document.getElementById('notificationStatus');
+    if (statusBadge) {
+        if (activadas) {
+            statusBadge.textContent = 'Activadas';
+            statusBadge.className = 'badge bg-success';
+            btnDesactivada.style.display = 'inline-block';
+            btnActivada.style.display = 'none';
+        } else {
+            statusBadge.textContent = 'Desactivadas';
+            statusBadge.className = 'badge bg-secondary';
+            btnDesactivada.style.display = 'none';
+            btnActivada.style.display = 'inline-block';
+        }
+    }
+}
+
+function enviarNotificacion() {
+    const notificationOptions = {
+        body: "¡Gracias por usar nuestra aplicación!",
+        icon: "/img/logo.jpg",
+    };
+    new Notification("¡Notificación de GeoMapFoto!", notificationOptions);
+}
+
+function notificarme() {
+    if (!("Notification" in window)) {
+        alert("Tu navegador no soporta notificaciones.");
+        return;
+    }
+    
+    if (Notification.permission === "granted") {
+        enviarNotificacion();
+    } else if (Notification.permission !== "denied" || Notification.permission === "default") {
+        Notification.requestPermission().then(permission => {
+            if (permission === "granted") {
+                enviarNotificacion();
+            }
+        });
+    }
+}
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
+function getPublicKey() {
+    return fetch(`${API_URL}/notificaciones/key`)
+        .then(res => res.text())
+        .then(key => urlBase64ToUint8Array(key));
+}
+
+function cancelarSuscripcion() {
+    if (!swReg) return console.error('No hay registro de Service Worker');
+    
+    swReg.pushManager.getSubscription().then(subscription => {
+        if (subscription) {
+            return subscription.unsubscribe().then(() => {
+                // Notificar al servidor que se canceló la suscripción
+                return fetch(`${API_URL}/notificaciones/unsubscribe`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(subscription)
+                });
+            }).then(() => {
+                    verificarSuscripcion(false);
+                    showToast('Notificaciones desactivadas', 'info');
+            }).catch(err => {
+                console.error('Error al cancelar suscripción:', err);
+                showToast('Error al desactivar notificaciones', 'error');
+            });
+        } else {
+            verificarSuscripcion(false);
+        }
+    }).catch(err => {
+        console.error('Error al obtener suscripción:', err);
+        showToast('Error al verificar suscripción', 'error');
+    });
+}
+
+/* =============================================
    Inicialización
    ============================================= */
 document.addEventListener('DOMContentLoaded', () => {
     db          = new PouchDB('mascotasDB');
     syncManager = new SyncManager(db);
 
+    // Inicializar botones de notificaciones
+    btnActivada = document.getElementById('btnActivarNotificaciones');
+    btnDesactivada = document.getElementById('btnDesactivarNotificaciones');
+
     document.getElementById('mascotaForm').addEventListener('submit', manejarEnvioFormulario);
     document.getElementById('btnCancelarEdicion').addEventListener('click', cancelarEdicion);
+
+    // Event listeners para botones de notificaciones
+    if (btnDesactivada) {
+        btnDesactivada.addEventListener('click', function () {
+            if (!swReg) return console.error('No hay registro de Service Worker');
+            getPublicKey().then(key => {
+                swReg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: key
+                }).then(res => res.toJSON())
+                    .then(subscription => {
+                        // Modo demo para GitHub Pages
+                        if (window.location.hostname.includes('github.io')) {
+                            console.log('Demo: Suscripción simulada:', subscription);
+                            verificarSuscripcion(true);
+                            showToast('Notificaciones activadas (modo demo)', 'success');
+                            return;
+                        }
+                        
+                        fetch(`${API_URL}/notificaciones/subscribe`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(subscription)
+                        })
+                        .then(() => verificarSuscripcion(true))
+                        .catch(err => {
+                            console.error('Error al suscribir:', err);
+                            showToast('Error al activar notificaciones', 'error');
+                        });
+                    })
+                    .catch(err => {
+                        console.error('Error al suscribirse:', err);
+                        showToast('Error al activar notificaciones', 'error');
+                    });
+            }).catch(err => {
+                console.error('Error al obtener clave pública:', err);
+                showToast('Error al conectar con el servidor', 'error');
+            });
+        });
+    }
+
+    if (btnActivada) {
+        btnActivada.addEventListener('click', function () {
+            cancelarSuscripcion();
+        });
+    }
+
+    // Verificar estado inicial de la suscripción después de un pequeño retraso
+    setTimeout(() => {
+        if (window.swReg) {
+            swReg = window.swReg;
+            swReg.pushManager.getSubscription().then(subscription => {
+                verificarSuscripcion(!!subscription);
+            });
+        }
+    }, 100);
 
     cargarMascotas();
 });
