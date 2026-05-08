@@ -1,4 +1,5 @@
 # Dependencies
+backend/node_modules
 node_modules/
 vendor/
 .pnp

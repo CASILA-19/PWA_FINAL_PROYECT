@@ -19,7 +19,9 @@ services:
       retries: 5
 
   api-mascotas:
-    image: haccmusik/mascotas:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     restart: always
     depends_on:
       postgres:
@@ -29,4 +31,12 @@ services:
     environment:
       - MASCOTAS_PORT=${MASCOTAS_PORT}
       - PORT=${MASCOTAS_PORT}
-      - MASCOTAS_DATABASE_URL=postgresql://${MASCOTAS_POSTGRES_USER}:${MASCOTAS_POSTGRES_PASSWORD}@postgres:5432/${MASCOTAS_POSTGRES_DB}?schema=public
+      - MASCOTAS_POSTGRES_HOST=postgres
+      - MASCOTAS_POSTGRES_USER=${MASCOTAS_POSTGRES_USER}
+      - MASCOTAS_POSTGRES_PASSWORD=${MASCOTAS_POSTGRES_PASSWORD}
+      - MASCOTAS_POSTGRES_DB=${MASCOTAS_POSTGRES_DB}
+      - MASCOTAS_POSTGRES_PORT=5432
+      - JWT_SECRET=${JWT_SECRET}
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
