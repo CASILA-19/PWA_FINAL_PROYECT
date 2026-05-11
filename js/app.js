@@ -1,9 +1,3 @@
-/**
- * app.js — Lógica principal: CRUD de mascotas + sincronización offline (PouchDB)
- */
-
-const API_URL = 'https://elprofehugo.online/';
-
 let db;
 let syncManager;
 let mascotaEnEdicionId = null;
@@ -11,9 +5,6 @@ let swReg = null;
 let btnActivada = null;
 let btnDesactivada = null;
 
-/* =============================================
-   Utilidad: Toast de notificaciones
-   ============================================= */
 function showToast(message, type = 'info') {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
@@ -23,9 +14,6 @@ function showToast(message, type = 'info') {
     setTimeout(() => toast.remove(), 3000);
 }
 
-/* =============================================
-   SyncManager — sincronización con el servidor
-   ============================================= */
 class SyncManager {
     constructor(db) {
         this.db = db;
@@ -35,7 +23,7 @@ class SyncManager {
     }
 
     _setupListeners() {
-        window.addEventListener('online',  () => { this._updateStatus(); this.sync(); });
+        window.addEventListener('online', () => { this._updateStatus(); this.sync(); });
         window.addEventListener('offline', () => this._updateStatus());
         this._updateStatus();
     }
@@ -45,10 +33,10 @@ class SyncManager {
         if (!badge) return;
         if (navigator.onLine) {
             badge.textContent = 'En línea';
-            badge.className   = 'badge bg-success';
+            badge.className = 'badge bg-success';
         } else {
             badge.textContent = 'Sin conexión';
-            badge.className   = 'badge bg-secondary';
+            badge.className = 'badge bg-secondary';
         }
     }
 
@@ -72,104 +60,107 @@ class SyncManager {
     _setSyncingUI(syncing) {
         const btn = document.getElementById('btnSync');
         if (!btn) return;
-        btn.disabled   = syncing;
-        btn.innerHTML  = syncing
+        btn.disabled = syncing;
+        btn.innerHTML = syncing
             ? '<i class="fas fa-spinner fa-spin me-1"></i>Sincronizando...'
             : '<i class="fas fa-rotate me-1"></i>Sincronizar';
     }
 
     async syncUp() {
-        const result  = await this.db.allDocs({ include_docs: true });
+        const result = await this.db.allDocs({ include_docs: true });
         const pending = result.rows.filter(r => r.doc.syncStatus && r.doc.syncStatus !== 'synced');
+
+        const token = localStorage.getItem('jwt_token') || '';
+        const headers = { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` 
+        };
 
         for (const row of pending) {
             const doc = row.doc;
             try {
                 if (doc.syncStatus === 'pending_create') {
-                    const res = await fetch(API_URL, {
+                    
+                    // 1. Registrar Persona
+                    const resPersona = await fetch(`${ENV.API_URL}/api/v1/personas`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ nombre: doc.nombre, tipo: doc.tipo, edad: doc.edad })
+                        headers,
+                        body: JSON.stringify(doc.persona)
                     });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const created = await res.json();
-                    await this.db.put({ ...doc, remoteId: created.id, syncStatus: 'synced' });
+                    if (!resPersona.ok) throw new Error(`HTTP Persona ${resPersona.status}`);
 
-                } else if (doc.syncStatus === 'pending_update' && doc.remoteId) {
-                    const res = await fetch(`${API_URL}/${doc.remoteId}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ nombre: doc.nombre, tipo: doc.tipo, edad: doc.edad })
+                    // 2. Registrar Mascota
+                    const resMascota = await fetch(`${ENV.API_URL}/api/v1/mascotas`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(doc.mascota)
                     });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    if (!resMascota.ok) throw new Error(`HTTP Mascota ${resMascota.status}`);
+
+                    // 3. Registrar Censo
+                    const resCenso = await fetch(`${ENV.API_URL}/api/v1/censos`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            id: doc._id,
+                            idMascota: doc.mascota.id,
+                            idDueno: doc.persona.id,
+                            fotografia: doc.censo.fotografia,
+                            lat: doc.censo.lat,
+                            lon: doc.censo.lon,
+                            idProyecto: doc.idProyecto,
+                            color: doc.color
+                        })
+                    });
+                    if (!resCenso.ok) throw new Error(`HTTP Censo ${resCenso.status}`);
                     await this.db.put({ ...doc, syncStatus: 'synced' });
-
+                
                 } else if (doc.syncStatus === 'pending_delete') {
-                    if (doc.remoteId) {
-                        const res = await fetch(`${API_URL}/${doc.remoteId}`, { method: 'DELETE' });
-                        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
-                    }
                     await this.db.remove(doc);
                 }
             } catch (err) {
-                console.error(`Error al sincronizar doc ${doc._id}:`, err);
+                console.error(`Error al sincronizar censo ${doc._id}:`, err);
             }
         }
     }
 
     async syncDown() {
-        const res = await fetch(API_URL);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const remoteMascotas = await res.json();
-
-        const localResult = await this.db.allDocs({ include_docs: true });
-        const remoteIdMap = {};
-        for (const row of localResult.rows) {
-            if (row.doc.remoteId) remoteIdMap[row.doc.remoteId] = row.doc;
-        }
-
-        for (const remote of remoteMascotas) {
-            const localDoc = remoteIdMap[remote.id];
-            if (localDoc) {
-                if (localDoc.syncStatus === 'synced') {
-                    const needsUpdate =
-                        localDoc.nombre !== remote.nombre ||
-                        localDoc.tipo   !== remote.tipo   ||
-                        localDoc.edad   !== remote.edad;
-                    if (needsUpdate) {
+        try {
+            const token = localStorage.getItem('jwt_token') || '';
+            const response = await fetch(`${ENV.API_URL}/api/v1/censos`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (!response.ok) throw new Error('Error al obtener censos');
+            
+            const censos = await response.json();
+            
+            for (const censo of censos) {
+                try {
+                    await this.db.get(censo.id);
+                } catch (err) {
+                    if (err.status === 404) {
                         await this.db.put({
-                            ...localDoc,
-                            nombre: remote.nombre,
-                            tipo:   remote.tipo,
-                            edad:   remote.edad
+                            _id: censo.id,
+                            syncStatus: 'synced',
+                            idProyecto: censo.idProyecto,
+                            color: censo.color,
+                            persona: censo.dueno,
+                            mascota: censo.mascota,
+                            censo: {
+                                lat: censo.lat,
+                                lon: censo.lon,
+                                fotografia: censo.fotografiaCenso
+                            }
                         });
                     }
                 }
-            } else {
-                await this.db.put({
-                    _id:        `remote-${remote.id}`,
-                    nombre:     remote.nombre,
-                    tipo:       remote.tipo,
-                    edad:       remote.edad,
-                    remoteId:   remote.id,
-                    syncStatus: 'synced'
-                });
             }
-        }
-
-        const remoteIds = new Set(remoteMascotas.map(r => r.id));
-        for (const row of localResult.rows) {
-            const doc = row.doc;
-            if (doc.remoteId && !remoteIds.has(doc.remoteId) && doc.syncStatus === 'synced') {
-                await this.db.remove(doc);
-            }
+        } catch (err) {
+            console.error('Error en syncDown:', err);
         }
     }
 }
-
-/* =============================================
-   Notificaciones Push
-   ============================================= */
 
 function verificarSuscripcion(activadas) {
     const statusBadge = document.getElementById('notificationStatus');
@@ -201,23 +192,18 @@ function notificarme() {
         alert("Tu navegador no soporta notificaciones.");
         return;
     }
-    
     if (Notification.permission === "granted") {
         enviarNotificacion();
     } else if (Notification.permission !== "denied" || Notification.permission === "default") {
         Notification.requestPermission().then(permission => {
-            if (permission === "granted") {
-                enviarNotificacion();
-            }
+            if (permission === "granted") enviarNotificacion();
         });
     }
 }
 
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding)
-        .replace(/-/g, '+')
-        .replace(/_/g, '/');
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
     const rawData = window.atob(base64);
     const outputArray = new Uint8Array(rawData.length);
     for (let i = 0; i < rawData.length; ++i) {
@@ -227,115 +213,87 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 function getPublicKey() {
-    return fetch(`${API_URL}/notificaciones/key`)
-        .then(res => res.text())
+    return fetch(`${ENV.API_URL}/notificaciones/key`)
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.text();
+        })
         .then(key => urlBase64ToUint8Array(key));
 }
 
 function cancelarSuscripcion() {
-    if (!swReg) return console.error('No hay registro de Service Worker');
-    
+    if (!swReg) return;
     swReg.pushManager.getSubscription().then(subscription => {
         if (subscription) {
             return subscription.unsubscribe().then(() => {
-                // Notificar al servidor que se canceló la suscripción
-                return fetch(`${API_URL}/notificaciones/unsubscribe`, {
+                return fetch(`${ENV.API_URL}/notificaciones/unsubscribe`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(subscription)
                 });
             }).then(() => {
-                    verificarSuscripcion(false);
-                    showToast('Notificaciones desactivadas', 'info');
-            }).catch(err => {
-                console.error('Error al cancelar suscripción:', err);
-                showToast('Error al desactivar notificaciones', 'error');
-            });
+                verificarSuscripcion(false);
+                showToast('Notificaciones desactivadas', 'info');
+            }).catch(() => showToast('Error al desactivar notificaciones', 'error'));
         } else {
             verificarSuscripcion(false);
         }
-    }).catch(err => {
-        console.error('Error al obtener suscripción:', err);
-        showToast('Error al verificar suscripción', 'error');
     });
 }
 
-/* =============================================
-   Inicialización
-   ============================================= */
 document.addEventListener('DOMContentLoaded', () => {
-    db          = new PouchDB('mascotasDB');
+    db = new PouchDB('mascotasDB');
     syncManager = new SyncManager(db);
 
-    // Inicializar botones de notificaciones
+    // Mostrar usuario actual
+    const usuario = localStorage.getItem('usuario');
+    if (usuario) {
+        document.getElementById('usuarioActual').textContent = `👤 ${usuario}`;
+    }
+
     btnActivada = document.getElementById('btnActivarNotificaciones');
     btnDesactivada = document.getElementById('btnDesactivarNotificaciones');
 
     document.getElementById('mascotaForm').addEventListener('submit', manejarEnvioFormulario);
     document.getElementById('btnCancelarEdicion').addEventListener('click', cancelarEdicion);
 
-    // Event listeners para botones de notificaciones
     if (btnDesactivada) {
         btnDesactivada.addEventListener('click', function () {
-            if (!swReg) return console.error('No hay registro de Service Worker');
+            if (!swReg) return;
             getPublicKey().then(key => {
-                swReg.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: key
-                }).then(res => res.toJSON())
+                swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
+                    .then(res => res.toJSON())
                     .then(subscription => {
-                        // Modo demo para GitHub Pages
-                        if (window.location.hostname.includes('github.io')) {
-                            console.log('Demo: Suscripción simulada:', subscription);
-                            verificarSuscripcion(true);
-                            showToast('Notificaciones activadas (modo demo)', 'success');
-                            return;
-                        }
-                        
-                        fetch(`${API_URL}/notificaciones/subscribe`, {
+                        fetch(`${ENV.API_URL}/notificaciones/subscribe`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(subscription)
                         })
-                        .then(() => verificarSuscripcion(true))
-                        .catch(err => {
-                            console.error('Error al suscribir:', err);
-                            showToast('Error al activar notificaciones', 'error');
-                        });
-                    })
-                    .catch(err => {
-                        console.error('Error al suscribirse:', err);
-                        showToast('Error al activar notificaciones', 'error');
-                    });
-            }).catch(err => {
-                console.error('Error al obtener clave pública:', err);
-                showToast('Error al conectar con el servidor', 'error');
+                        .then(res => {
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                            verificarSuscripcion(true);
+                            showToast('Notificaciones activadas', 'success');
+                        }).catch(() => showToast('Error en servidor', 'error'));
+                    }).catch(() => showToast('Error de suscripción', 'error'));
             });
         });
     }
 
     if (btnActivada) {
-        btnActivada.addEventListener('click', function () {
-            cancelarSuscripcion();
-        });
+        btnActivada.addEventListener('click', () => cancelarSuscripcion());
     }
 
-    // Verificar estado inicial de la suscripción después de un pequeño retraso
     setTimeout(() => {
         if (window.swReg) {
             swReg = window.swReg;
-            swReg.pushManager.getSubscription().then(subscription => {
-                verificarSuscripcion(!!subscription);
-            });
+            swReg.pushManager.getSubscription().then(sub => verificarSuscripcion(!!sub));
         }
     }, 100);
 
     cargarMascotas();
+    cargarPersonas();
 });
 
-/* =============================================
-   Formulario
-   ============================================= */
 function manejarEnvioFormulario(event) {
     event.preventDefault();
     if (mascotaEnEdicionId) {
@@ -346,195 +304,341 @@ function manejarEnvioFormulario(event) {
 }
 
 function agregarMascota() {
-    const nombre = document.getElementById('nombre').value.trim();
-    const tipo   = document.getElementById('tipo').value;
-    const edad   = parseInt(document.getElementById('edad').value, 10);
+    // ═══════════════════════════════════════════════════════════
+    // DATOS DEL DUEÑO (Entidad: Persona)
+    // ═══════════════════════════════════════════════════════════
+    const nombres = document.getElementById('nombres')?.value.trim() || '';
+    const apellidos = document.getElementById('apellidos')?.value.trim() || '';
+    const tipoDocumento = document.getElementById('tipoDocumento')?.value || '';
+    const documento = document.getElementById('documento')?.value.trim() || '';
+    const direccion = document.getElementById('direccion')?.value.trim() || '';
+    const telefono = document.getElementById('telefono')?.value.trim() || '';
+    const ciudad = document.getElementById('ciudad')?.value.trim() || '';
+    const usuario = document.getElementById('usuario')?.value.trim() || '';
+    const contrasena = document.getElementById('contrasena')?.value.trim() || '';
 
-    if (!nombre || !tipo || Number.isNaN(edad)) return;
+    // ═══════════════════════════════════════════════════════════
+    // DATOS DE LA MASCOTA (Entidad: Mascota)
+    // ═══════════════════════════════════════════════════════════
+    const nombre = document.getElementById('nombre')?.value.trim() || '';
+    const tipo = document.getElementById('tipo')?.value || '';
+    const genero = document.getElementById('genero')?.value || '';
+    const edad = parseFloat(document.getElementById('edad')?.value) || 0;
+    const fotografia = document.getElementById('fotografia')?.value.trim() || '';
 
-    const mascota = {
-        _id:        new Date().toISOString(),
-        nombre,
-        tipo,
-        edad,
-        remoteId:   null,
-        syncStatus: 'pending_create'
+    // ═══════════════════════════════════════════════════════════
+    // DATOS DEL CENSO (Entidad: Censo)
+    // ═══════════════════════════════════════════════════════════
+    const imgElement = document.getElementById('foto');
+    const fotoBase64 = imgElement && imgElement.src.startsWith('data:image') ? imgElement.src : null;
+    const lat = window.latitudActual || null;
+    const lon = window.longitudActual || null;
+
+    // ═══════════════════════════════════════════════════════════
+    // VALIDACIONES
+    // ═══════════════════════════════════════════════════════════
+    if (!nombres || !apellidos || !tipoDocumento || !documento || !telefono || !direccion || !ciudad) {
+        showToast('Por favor completa todos los datos del dueño.', 'error');
+        return;
+    }
+
+    if (!nombre || !tipo || !genero || edad <= 0) {
+        showToast('Por favor completa todos los datos de la mascota.', 'error');
+        return;
+    }
+
+    if (!fotoBase64) {
+        showToast('Por favor toma una foto del censo.', 'error');
+        return;
+    }
+
+    if (!lat || !lon) {
+        showToast('Por favor obtén la ubicación GPS.', 'error');
+        return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // VALIDACIÓN DE TAMAÑO DE FOTO (MAX 50KB)
+    // ═══════════════════════════════════════════════════════════
+    const fotoSizeKB = (fotoBase64.length * 3) / 4 / 1024;
+    if (fotoSizeKB > 50) {
+        showToast(`La foto es muy grande (${fotoSizeKB.toFixed(2)} KB). Máximo permitido: 50 KB.`, 'error');
+        return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ENCRIPTAR CONTRASEÑA SI EXISTE
+    // ═══════════════════════════════════════════════════════════
+    let contrasenaHash = '';
+    if (contrasena) {
+        const salt = bcrypt.genSaltSync(10);
+        contrasenaHash = bcrypt.hashSync(contrasena, salt);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // CONSTRUCCIÓN DEL REGISTRO COMPLETO
+    // ═══════════════════════════════════════════════════════════
+    const registroCompleto = {
+        _id: crypto.randomUUID(),
+        syncStatus: 'pending_create',
+        idProyecto: ENV.ID_PROYECTO,
+        color: ENV.COLOR,
+        
+        persona: {
+            id: crypto.randomUUID(),
+            nombres,
+            apellidos,
+            tipoDocumento,
+            documento,
+            direccion,
+            telefono,
+            ciudad,
+            usuario,
+            contrasena: contrasenaHash
+        },
+        
+        mascota: {
+            id: crypto.randomUUID(),
+            nombre,
+            tipo,
+            genero,
+            edad,
+            fotografia
+        },
+        
+        censo: {
+            lat,
+            lon,
+            fotografia: fotoBase64
+        }
     };
 
-    db.put(mascota)
+    // ═══════════════════════════════════════════════════════════
+    // GUARDAR EN POUCHDB
+    // ═══════════════════════════════════════════════════════════
+    db.put(registroCompleto)
         .then(() => {
             limpiarFormulario();
             cargarMascotas();
-            showToast(`${nombre} agregado correctamente.`, 'success');
+            showToast(`Censo de ${nombre} registrado correctamente (${fotoSizeKB.toFixed(2)} KB).`, 'success');
             if (navigator.onLine) syncManager.sync();
         })
         .catch(err => {
-            console.error('Error al agregar mascota:', err);
-            showToast('No se pudo agregar la mascota.', 'error');
+            console.error('Error al guardar localmente:', err);
+            showToast('No se pudo guardar la información.', 'error');
         });
 }
 
 function actualizarMascota(id) {
-    const nombre = document.getElementById('nombre').value.trim();
-    const tipo   = document.getElementById('tipo').value;
-    const edad   = parseInt(document.getElementById('edad').value, 10);
+    // Datos del Dueño
+    const nombres = document.getElementById('nombres')?.value.trim() || '';
+    const apellidos = document.getElementById('apellidos')?.value.trim() || '';
+    const tipoDocumento = document.getElementById('tipoDocumento')?.value || '';
+    const documento = document.getElementById('documento')?.value.trim() || '';
+    const direccion = document.getElementById('direccion')?.value.trim() || '';
+    const telefono = document.getElementById('telefono')?.value.trim() || '';
+    const ciudad = document.getElementById('ciudad')?.value.trim() || '';
+    const usuario = document.getElementById('usuario')?.value.trim() || '';
+    const contrasena = document.getElementById('contrasena')?.value.trim() || '';
 
-    if (!nombre || !tipo || Number.isNaN(edad)) return;
+    // Datos de la Mascota
+    const nombre = document.getElementById('nombre')?.value.trim() || '';
+    const tipo = document.getElementById('tipo')?.value || '';
+    const genero = document.getElementById('genero')?.value || '';
+    const edad = parseFloat(document.getElementById('edad')?.value) || 0;
+    const fotografia = document.getElementById('fotografia')?.value.trim() || '';
 
-    db.get(id)
-        .then(doc => {
-            doc.nombre = nombre;
-            doc.tipo   = tipo;
-            doc.edad   = edad;
-            if (doc.syncStatus !== 'pending_create') doc.syncStatus = 'pending_update';
-            return db.put(doc);
-        })
-        .then(() => {
-            cancelarEdicion();
-            cargarMascotas();
-            showToast(`${nombre} actualizado correctamente.`, 'success');
-            if (navigator.onLine) syncManager.sync();
-        })
-        .catch(err => {
-            console.error('Error al actualizar mascota:', err);
-            showToast('No se pudo actualizar la mascota.', 'error');
-        });
+    if (!nombre || !nombres || !apellidos || !documento) {
+        showToast('Por favor completa los campos obligatorios.', 'error');
+        return;
+    }
+
+    db.get(id).then(doc => {
+        // Actualizar Persona
+        doc.persona.nombres = nombres;
+        doc.persona.apellidos = apellidos;
+        doc.persona.tipoDocumento = tipoDocumento;
+        doc.persona.documento = documento;
+        doc.persona.direccion = direccion;
+        doc.persona.telefono = telefono;
+        doc.persona.ciudad = ciudad;
+        doc.persona.usuario = usuario;
+        
+        // Encriptar contraseña si se proporciona
+        if (contrasena) {
+            const salt = bcrypt.genSaltSync(10);
+            doc.persona.contrasena = bcrypt.hashSync(contrasena, salt);
+        }
+
+        // Actualizar Mascota
+        doc.mascota.nombre = nombre;
+        doc.mascota.tipo = tipo;
+        doc.mascota.genero = genero;
+        doc.mascota.edad = edad;
+        doc.mascota.fotografia = fotografia;
+
+        if (doc.syncStatus !== 'pending_create') doc.syncStatus = 'pending_update';
+        return db.put(doc);
+    }).then(() => {
+        cancelarEdicion();
+        cargarMascotas();
+        showToast('Registro actualizado correctamente.', 'success');
+        if (navigator.onLine) syncManager.sync();
+    }).catch(() => showToast('Error al actualizar.', 'error'));
 }
 
 function eliminarMascota(id) {
-    db.get(id)
-        .then(doc => {
-            const nombre = doc.nombre;
-            const accion = !doc.remoteId
-                ? db.remove(doc)
-                : db.put({ ...doc, syncStatus: 'pending_delete' });
-
-            return accion.then(() => nombre);
-        })
-        .then(nombre => {
-            if (mascotaEnEdicionId === id) cancelarEdicion();
-            cargarMascotas();
-            showToast(`${nombre} eliminado.`, 'info');
-            if (navigator.onLine) syncManager.sync();
-        })
-        .catch(err => {
-            console.error('Error al eliminar mascota:', err);
-            showToast('No se pudo eliminar la mascota.', 'error');
-        });
+    db.get(id).then(doc => {
+        return (!doc.remoteId) ? db.remove(doc) : db.put({ ...doc, syncStatus: 'pending_delete' });
+    }).then(() => {
+        if (mascotaEnEdicionId === id) cancelarEdicion();
+        cargarMascotas();
+        showToast('Registro eliminado.', 'info');
+        if (navigator.onLine) syncManager.sync();
+    }).catch(() => showToast('Error al eliminar.', 'error'));
 }
 
 function iniciarEdicion(id) {
-    db.get(id)
-        .then(doc => {
-            document.getElementById('nombre').value = doc.nombre;
-            document.getElementById('tipo').value   = doc.tipo;
-            document.getElementById('edad').value   = doc.edad;
+    db.get(id).then(doc => {
+        // Cargar datos del Dueño
+        document.getElementById('nombres').value = doc.persona.nombres || '';
+        document.getElementById('apellidos').value = doc.persona.apellidos || '';
+        document.getElementById('tipoDocumento').value = doc.persona.tipoDocumento || '';
+        document.getElementById('documento').value = doc.persona.documento || '';
+        document.getElementById('direccion').value = doc.persona.direccion || '';
+        document.getElementById('telefono').value = doc.persona.telefono || '';
+        document.getElementById('ciudad').value = doc.persona.ciudad || '';
+        document.getElementById('usuario').value = doc.persona.usuario || '';
+        // No cargamos la contraseña por seguridad
 
-            mascotaEnEdicionId = id;
-            document.getElementById('btnGuardar').innerHTML =
-                '<i class="fas fa-floppy-disk me-1"></i>Guardar cambios';
-            document.getElementById('btnCancelarEdicion').classList.remove('d-none');
-            document.getElementById('mascotaForm').scrollIntoView({ behavior: 'smooth' });
-        })
-        .catch(err => {
-            console.error('Error al iniciar edición:', err);
-            showToast('No se pudo cargar la mascota para editar.', 'error');
-        });
+        // Cargar datos de la Mascota
+        document.getElementById('nombre').value = doc.mascota.nombre || '';
+        document.getElementById('tipo').value = doc.mascota.tipo || '';
+        document.getElementById('genero').value = doc.mascota.genero || '';
+        document.getElementById('edad').value = doc.mascota.edad || '';
+        document.getElementById('fotografia').value = doc.mascota.fotografia || '';
+
+        mascotaEnEdicionId = id;
+        document.getElementById('btnGuardar').innerHTML = '<i class="fas fa-floppy-disk me-1"></i>Guardar cambios';
+        document.getElementById('btnCancelarEdicion').classList.remove('d-none');
+        document.getElementById('mascotaForm').scrollIntoView({ behavior: 'smooth' });
+    }).catch(() => showToast('Error al cargar edición.', 'error'));
 }
 
 function cancelarEdicion() {
     mascotaEnEdicionId = null;
-    document.getElementById('btnGuardar').innerHTML =
-        '<i class="fas fa-plus me-1"></i>Agregar';
+    document.getElementById('btnGuardar').innerHTML = '<i class="fas fa-plus me-1"></i>Agregar';
     document.getElementById('btnCancelarEdicion').classList.add('d-none');
     limpiarFormulario();
 }
 
 function limpiarFormulario() {
     document.getElementById('mascotaForm').reset();
+    const foto = document.getElementById('foto');
+    if (foto) foto.style.display = 'none';
+    window.latitudActual = null;
+    window.longitudActual = null;
 }
 
-/* =============================================
-   Tabla de mascotas
-   ============================================= */
 function cargarMascotas() {
     const tbody = document.getElementById('mascotasTbody');
     tbody.innerHTML = '';
 
-    db.allDocs({ include_docs: true })
-        .then(result => {
-            const mascotas = result.rows
-                .map(r => r.doc)
-                .filter(doc => doc.syncStatus !== 'pending_delete');
+    db.allDocs({ include_docs: true }).then(result => {
+        const censos = result.rows.map(r => r.doc).filter(doc => doc.syncStatus !== 'pending_delete');
 
-            if (mascotas.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="4" class="empty-state">
-                            <i class="fas fa-paw"></i>
-                            No hay mascotas registradas aún.
-                        </td>
-                    </tr>`;
-                return;
-            }
-
-            mascotas.forEach(mascota => agregarFilaMascota(mascota, tbody));
-        })
-        .catch(err => {
-            console.error('Error al cargar mascotas:', err);
-            showToast('Error al cargar la lista de mascotas.', 'error');
-        });
+        if (censos.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="empty-state">
+                        <i class="fas fa-clipboard-list"></i>
+                        <p>No hay censos registrados aún.</p>
+                        <small>Completa el formulario para registrar tu primer censo.</small>
+                    </td>
+                </tr>`;
+            return;
+        }
+        censos.forEach(doc => agregarFilaMascota(doc, tbody));
+    });
 }
 
-function agregarFilaMascota(mascota, tbody) {
-    const fila = document.createElement('tr');
-    fila.dataset.id = mascota._id;
+async function cargarPersonas() {
+    try {
+        const token = localStorage.getItem('jwt_token') || '';
+        const response = await fetch(`${ENV.API_URL}/api/v1/personas`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!response.ok) throw new Error('Error al cargar personas');
+        
+        const personas = await response.json();
+        console.log('Personas cargadas (sin contraseñas):', personas);
+        
+    } catch (error) {
+        console.error('Error al cargar personas:', error);
+    }
+}
 
-    // Columna nombre con indicador de pendiente
+function agregarFilaMascota(doc, tbody) {
+    const fila = document.createElement('tr');
+    
+    // Columna: Dueño
+    const tdDueno = document.createElement('td');
+    tdDueno.innerHTML = `
+        <strong>${doc.persona.nombres} ${doc.persona.apellidos}</strong><br>
+        <small class="text-muted">${doc.persona.tipoDocumento}: ${doc.persona.documento}</small>
+    `;
+
+    // Columna: Mascota
     const tdNombre = document.createElement('td');
-    tdNombre.textContent = mascota.nombre;
-    if (mascota.syncStatus !== 'synced') {
+    tdNombre.innerHTML = `<strong>${doc.mascota.nombre}</strong>`;
+    if (doc.syncStatus !== 'synced') {
         const badge = document.createElement('span');
         badge.className = 'badge bg-warning text-dark ms-2';
-        badge.title     = 'Pendiente de sincronización';
-        badge.textContent = '⏳ Pendiente';
+        badge.innerHTML = '<i class="fas fa-clock"></i> Pendiente';
         tdNombre.appendChild(badge);
     }
 
-    // Columna tipo
+    // Columna: Tipo
     const tdTipo = document.createElement('td');
-    tdTipo.textContent = mascota.tipo;
+    const iconos = {
+        'PERRO': '🐶',
+        'GATO': '🐱',
+        'PAJARO': '🐦',
+        'CONEJO': '🐰',
+        'HAMSTER': '🐹',
+        'OTRO': '🐾'
+    };
+    tdTipo.textContent = `${iconos[doc.mascota.tipo] || '🐾'} ${doc.mascota.tipo}`;
 
-    // Columna edad
+    // Columna: Edad
     const tdEdad = document.createElement('td');
-    tdEdad.textContent = `${mascota.edad} año${mascota.edad !== 1 ? 's' : ''}`;
+    tdEdad.textContent = `${doc.mascota.edad} años`;
 
-    // Columna acciones
+    // Columna: Estado
+    const tdEstado = document.createElement('td');
+    if (doc.syncStatus === 'synced') {
+        tdEstado.innerHTML = '<span class="badge bg-success"><i class="fas fa-check"></i> Sincronizado</span>';
+    } else if (doc.syncStatus === 'pending_create') {
+        tdEstado.innerHTML = '<span class="badge bg-warning text-dark"><i class="fas fa-clock"></i> Pendiente</span>';
+    } else if (doc.syncStatus === 'pending_update') {
+        tdEstado.innerHTML = '<span class="badge bg-info"><i class="fas fa-sync"></i> Actualización</span>';
+    } else {
+        tdEstado.innerHTML = '<span class="badge bg-secondary">Desconocido</span>';
+    }
+
+    // Columna: Acciones
     const tdAcciones = document.createElement('td');
     tdAcciones.className = 'text-center';
+    tdAcciones.innerHTML = `
+        <button class="btn btn-sm btn-warning btn-action me-1" onclick="iniciarEdicion('${doc._id}')" title="Editar">
+            <i class="fas fa-pen"></i>
+        </button>
+        <button class="btn btn-sm btn-danger btn-action" onclick="if(confirm('¿Eliminar censo de ${doc.mascota.nombre}?')) eliminarMascota('${doc._id}')" title="Eliminar">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
 
-    const btnEditar = document.createElement('button');
-    btnEditar.className = 'btn btn-warning btn-action me-1';
-    btnEditar.innerHTML = '<i class="fas fa-pen"></i>';
-    btnEditar.title     = 'Editar';
-    btnEditar.addEventListener('click', () => iniciarEdicion(mascota._id));
-
-    const btnEliminar = document.createElement('button');
-    btnEliminar.className = 'btn btn-danger btn-action';
-    btnEliminar.innerHTML = '<i class="fas fa-trash"></i>';
-    btnEliminar.title     = 'Eliminar';
-    btnEliminar.addEventListener('click', () => {
-        if (confirm(`¿Eliminar a ${mascota.nombre}?`)) {
-            eliminarMascota(mascota._id);
-        }
-    });
-
-    tdAcciones.appendChild(btnEditar);
-    tdAcciones.appendChild(btnEliminar);
-
-    fila.appendChild(tdNombre);
-    fila.appendChild(tdTipo);
-    fila.appendChild(tdEdad);
-    fila.appendChild(tdAcciones);
+    fila.append(tdDueno, tdNombre, tdTipo, tdEdad, tdEstado, tdAcciones);
     tbody.appendChild(fila);
 }

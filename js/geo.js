@@ -49,6 +49,10 @@ function getGeoLocation() {
 }
 
 function mostrarMapa(lat, lng) {
+    // Guardar coordenadas globalmente para el formulario
+    window.latitudActual = lat;
+    window.longitudActual = lng;
+
     if (window._mapa) {
         window._mapa.remove();
         window._mapa = null;
@@ -78,6 +82,7 @@ function mostrarMapa(lat, lng) {
         .bindPopup(`
             <div style="text-align:center; font-family: sans-serif;">
                 <strong>¡Aquí estoy!</strong><br>
+                <small>Lat: ${lat.toFixed(6)}, Lon: ${lng.toFixed(6)}</small><br>
                 ${_perritoBase64
                     ? `<img src="${_perritoBase64}" alt="Perrito" width="100"
                              style="border-radius:8px; margin-top:6px;">`
@@ -85,5 +90,5 @@ function mostrarMapa(lat, lng) {
             </div>`)
         .openPopup();
 
-    showToast('Ubicación obtenida correctamente.', 'success');
+    showToast(`Ubicación obtenida: ${lat.toFixed(6)}, ${lng.toFixed(6)}`, 'success');
 }

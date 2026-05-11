@@ -44,10 +44,16 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
+    //  Si la petición va a la API central, usar Network Only (o Network First)
+    if (e.request.url.includes('elprofehugo.online')) {
+        e.respondWith(fetch(e.request));
+        return; // Salimos de la función para que no pase por la caché
+    }
+
+    // Para todo lo demás mantenemos tu Cache First
     const respuesta = caches.match(e.request).then((cachedResponse) => {
         if (cachedResponse) return cachedResponse;
         return fetch(e.request).then((networkResponse) => {
-            // Solo cachear si el esquema es http o https y el método es GET
             if ((e.request.url.startsWith('http://') || e.request.url.startsWith('https://')) && e.request.method === 'GET') {
                 caches.open(CACHE_DYNAMIC).then((cache) => {
                     cache.put(e.request, networkResponse.clone());
@@ -76,7 +82,7 @@ self.addEventListener('push', (e) => {
         body: data.cuerpo || 'Tienes una nueva notificación.',
         icon: data.icon || '/img/logo.jpg',
         badge: data.badge || '/favicon.ico',
-        vibrate: [100, 50, 100 , 50, 100],
+        vibrate: [100, 50, 100, 50, 100],
         openUrl: data.url || '/',
         data: {
             url: data.url || 'https://google.com',
@@ -97,7 +103,7 @@ self.addEventListener('notificationclick', (e) => {
     const notificacion = e.notification;
     const accion = e.action;
     console.log('Notificación clicada:', notificacion, 'Acción:', accion);
-    
+
     // Abrir URL si está disponible
     const urlToOpen = notificacion.data?.url || notificacion.openUrl || '/';
     e.waitUntil(
