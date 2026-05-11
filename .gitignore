@@ -1,0 +1,39 @@
+# Dependencias
+node_modules/
+jspm_packages/
+
+# Build y distribución
+dist/
+build/
+coverage/
+
+# Datos de bases de datos
+postgres_data/
+*.sqlite
+*.db
+
+# Archivos de entorno y configuración sensible
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# IDEs y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Otros
+tmp/
+.cache/
