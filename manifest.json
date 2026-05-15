@@ -1,0 +1,26 @@
+{
+    "name": "Mascotas App",
+    "short_name": "Mascotas",
+    "description": "Registra y gestiona tus mascotas con soporte offline.",
+    "start_url": "https://elprofehugo.online/",
+    "scope": "https://elprofehugo.online/",
+    "display": "standalone",
+    "orientation": "portrait-primary",
+    "background_color": "#0062FF",
+    "theme_color": "#0062FF",
+    "lang": "es",
+    "icons": [
+        {
+            "src": "img/icon-192.svg",
+            "sizes": "192x192",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "img/icon-512.svg",
+            "sizes": "512x512",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ]
+}

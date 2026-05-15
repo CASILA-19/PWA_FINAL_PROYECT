@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa de Censos - Mascotas</title>
+    <link rel="icon" href="img/icon-192.svg" type="image/svg+xml">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        #mapaCensos { height: calc(100vh - 80px); width: 100%; }
+        .info-window { max-width: 300px; }
+        .info-window img { width: 100%; border-radius: 0.5rem; margin-top: 0.5rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="index.html">
+                <img src="img/logo.jpg" alt="Logo">
+                Mascotas PROPWA_001
+            </a>
+            <div class="ms-auto d-flex align-items-center gap-2">
+                <a href="index.html" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-home me-1"></i>Inicio
+                </a>
+                <button class="btn btn-sm btn-outline-danger" onclick="logout()">
+                    <i class="fas fa-sign-out-alt me-1"></i>Salir
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div id="mapaCensos"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/map-censos.js"></script>
+    <script>verificarAuth();</script>
+</body>
+</html>
