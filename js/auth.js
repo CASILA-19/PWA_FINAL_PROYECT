@@ -20,15 +20,6 @@ function mostrarRegistro() {
     document.getElementById('mensaje').innerHTML = '';
 }
 
-function modoDemo() {
-    localStorage.setItem('jwt_token', 'demo_token_12345');
-    localStorage.setItem('token_type', 'Bearer');
-    localStorage.setItem('token_expires', Date.now() + (3600 * 1000));
-    localStorage.setItem('usuario', 'demo');
-    localStorage.setItem('modo_demo', 'true');
-    window.location.href = 'index.html';
-}
-
 async function handleLogin(e) {
     e.preventDefault();
     
@@ -55,7 +46,6 @@ async function handleLogin(e) {
         localStorage.setItem('token_type', data.tipoToken || 'Bearer');
         localStorage.setItem('token_expires', Date.now() + (data.expiraEn * 1000));
         localStorage.setItem('usuario', usuario);
-        localStorage.removeItem('modo_demo');
         
         mostrarMensaje('Login exitoso. Redirigiendo...', 'success');
         
@@ -88,11 +78,7 @@ async function handleRegistro(e) {
     }
     
     try {
-        const salt = bcrypt.genSaltSync(10);
-        const contrasenaHash = bcrypt.hashSync(contrasena, salt);
-        
         const persona = {
-            id: crypto.randomUUID(),
             nombres,
             apellidos,
             tipoDocumento,
@@ -101,7 +87,7 @@ async function handleRegistro(e) {
             telefono,
             ciudad,
             usuario,
-            contrasena: contrasenaHash
+            contrasena
         };
         
         const response = await fetch(`${ENV.API_URL}/api/v1/personas`, {
@@ -131,11 +117,7 @@ function mostrarMensaje(texto, tipo) {
 
 function verificarAuth() {
     const token = localStorage.getItem('jwt_token');
-    const expira = localStorage.getItem('token_expires');
-    const modoDemo = localStorage.getItem('modo_demo');
-    
-    if (modoDemo === 'true') return;
-    
+    const expira = localStorage.getItem('token_expires');    
     if (!token || (expira && Date.now() > parseInt(expira))) {
         if (!window.location.pathname.includes('login.html')) {
             localStorage.clear();
