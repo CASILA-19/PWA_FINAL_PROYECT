@@ -5,6 +5,79 @@ let swReg = null;
 let btnActivada = null;
 let btnDesactivada = null;
 
+// ═══════════════════════════════════════════════════════════
+// FUNCIONES DE VALIDACIÓN
+// ═══════════════════════════════════════════════════════════
+function soloNumeros(valor) {
+    return /^\d+$/.test(valor);
+}
+
+function validarDocumento(documento) {
+    if (!documento) {
+        return { valido: false, mensaje: 'El documento es requerido' };
+    }
+    if (!soloNumeros(documento)) {
+        return { valido: false, mensaje: 'El documento solo debe contener números' };
+    }
+    if (documento.length < 5 || documento.length > 15) {
+        return { valido: false, mensaje: 'El documento debe tener entre 5 y 15 dígitos' };
+    }
+    return { valido: true };
+}
+
+function validarTelefono(telefono) {
+    if (!telefono) {
+        return { valido: false, mensaje: 'El teléfono es requerido' };
+    }
+    if (!soloNumeros(telefono)) {
+        return { valido: false, mensaje: 'El teléfono solo debe contener números' };
+    }
+    if (telefono.length < 7 || telefono.length > 15) {
+        return { valido: false, mensaje: 'El teléfono debe tener entre 7 y 15 dígitos' };
+    }
+    return { valido: true };
+}
+
+function validarEdad(edad) {
+    if (!edad || edad <= 0) {
+        return { valido: false, mensaje: 'La edad debe ser mayor a 0' };
+    }
+    if (edad > 100) {
+        return { valido: false, mensaje: 'La edad no puede ser mayor a 100 años' };
+    }
+    return { valido: true };
+}
+
+function validarNombres(nombres) {
+    if (!nombres) {
+        return { valido: false, mensaje: 'Los nombres son requeridos' };
+    }
+    if (nombres.length < 2) {
+        return { valido: false, mensaje: 'Los nombres deben tener al menos 2 caracteres' };
+    }
+    return { valido: true };
+}
+
+function validarApellidos(apellidos) {
+    if (!apellidos) {
+        return { valido: false, mensaje: 'Los apellidos son requeridos' };
+    }
+    if (apellidos.length < 2) {
+        return { valido: false, mensaje: 'Los apellidos deben tener al menos 2 caracteres' };
+    }
+    return { valido: true };
+}
+
+function validarCiudad(ciudad) {
+    if (!ciudad) {
+        return { valido: false, mensaje: 'La ciudad es requerida' };
+    }
+    if (ciudad.length < 2) {
+        return { valido: false, mensaje: 'La ciudad debe tener al menos 2 caracteres' };
+    }
+    return { valido: true };
+}
+
 function showToast(message, type = 'info') {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
@@ -71,40 +144,108 @@ class SyncManager {
         const pending = result.rows.filter(r => r.doc.syncStatus && r.doc.syncStatus !== 'synced');
 
         const token = localStorage.getItem('jwt_token') || '';
-        const headers = { 
+        const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
+            'Authorization': `Bearer ${token}`
         };
 
         for (const row of pending) {
             const doc = row.doc;
             try {
                 if (doc.syncStatus === 'pending_create') {
-                    
-                    // 1. Registrar Persona
-                    const resPersona = await fetch(`${ENV.API_URL}/api/v1/personas`, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify(doc.persona)
-                    });
-                    if (!resPersona.ok) throw new Error(`HTTP Persona ${resPersona.status}`);
 
-                    // 2. Registrar Mascota
-                    const resMascota = await fetch(`${ENV.API_URL}/api/v1/mascotas`, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify(doc.mascota)
-                    });
-                    if (!resMascota.ok) throw new Error(`HTTP Mascota ${resMascota.status}`);
+                    // ── PASO 1: Registrar Persona ──────────────────
+                    let personaId = doc.remotePersonaId || null;
 
-                    // 3. Registrar Censo
+                    if (!personaId) {
+                        const personaData = {
+                            nombres: doc.persona.nombres,
+                            apellidos: doc.persona.apellidos,
+                            tipoDocumento: doc.persona.tipoDocumento,
+                            documento: doc.persona.documento,
+                            direccion: doc.persona.direccion,
+                            telefono: doc.persona.telefono,
+                            ciudad: doc.persona.ciudad
+                        };
+
+                        const resPersona = await fetch(`${ENV.API_URL}/api/v1/personas`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(personaData)
+                        });
+
+                        if (resPersona.status === 409) {
+                            // La persona ya existe: la buscamos por documento
+                            const resLista = await fetch(`${ENV.API_URL}/api/v1/personas`, { headers });
+
+                            if (!resLista.ok) throw new Error(`No se pudo obtener la lista de personas (${resLista.status})`);
+                            const listaPersonas = await resLista.json();
+                            const encontrada = listaPersonas.find(
+                                p => String(p.documento) === String(personaData.documento)
+                            );
+                            if (encontrada?.id) {
+                                personaId = encontrada.id;
+                            } else {
+                                throw new Error(`Persona con documento ${personaData.documento} no encontrada en la lista`);
+                            }
+                        } else if (resPersona.ok) {
+                            const personaCreada = await resPersona.json();
+                            personaId = personaCreada.id;
+                        } else {
+                            throw new Error(`HTTP Persona ${resPersona.status}`);
+                        }
+
+                        if (!personaId) throw new Error('No se pudo obtener el ID de la persona');
+
+                        // Guardar el progreso parcial para no repetir este paso si falla después
+                        const docActual1 = await this.db.get(doc._id);
+                        docActual1.remotePersonaId = personaId;
+                        await this.db.put(docActual1);
+                        doc = await this.db.get(doc._id);
+                    }
+
+                    // ── PASO 2: Registrar Mascota ──────────────────────────────
+                    // Si ya fue creada en un intento previo, reutilizamos el ID guardado.
+                    let mascotaId = doc.remoteMascotaId || null;
+                    if (!mascotaId) {
+                        const fotoLocal = doc.mascota.fotografia;
+                        const fotografiaUrl =
+                            fotoLocal?.startsWith('http')
+                                ? fotoLocal
+                                : `https://via.placeholder.com/150?text=${encodeURIComponent(nombre)}`;
+                        const mascotaData = {
+                            nombre: doc.mascota.nombre,
+                            tipo: doc.mascota.tipo,
+                            genero: doc.mascota.genero,
+                            edad: doc.mascota.edad,
+                            fotografia: fotografiaUrl  // siempre URL — requerido por la API
+                        };
+
+                        const resMascota = await fetch(`${ENV.API_URL}/api/v1/mascotas`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(mascotaData)
+                        });
+
+                        if (!resMascota.ok) throw new Error(`HTTP Mascota ${resMascota.status}`);
+                        const mascotaCreada = await resMascota.json();
+                        mascotaId = mascotaCreada.id;
+
+                        // Guardar el progreso parcial
+                        const docActual2 = await this.db.get(doc._id);
+                        docActual2.remoteMascotaId = mascotaId;
+                        await this.db.put(docActual2);
+                        doc = await this.db.get(doc._id);
+                    }
+
+
+                    // ── PASO 3: Registrar Censo ────────────────────────────────
                     const resCenso = await fetch(`${ENV.API_URL}/api/v1/censos`, {
                         method: 'POST',
                         headers,
                         body: JSON.stringify({
-                            id: doc._id,
-                            idMascota: doc.mascota.id,
-                            idDueno: doc.persona.id,
+                            idMascota: mascotaId,
+                            idDueno: personaId,
                             fotografia: doc.censo.fotografia,
                             lat: doc.censo.lat,
                             lon: doc.censo.lon,
@@ -113,8 +254,85 @@ class SyncManager {
                         })
                     });
                     if (!resCenso.ok) throw new Error(`HTTP Censo ${resCenso.status}`);
-                    await this.db.put({ ...doc, syncStatus: 'synced' });
-                
+
+                    const docFinal = await this.db.get(doc._id);
+                    docFinal.syncStatus = 'synced';
+                    await this.db.put(docFinal);
+
+                } else if (doc.syncStatus === 'pending_update') {
+
+                    const remotePersonaId = doc.remotePersonaId;
+                    const remoteMascotaId = doc.remoteMascotaId;
+
+                    if (!remotePersonaId || !remoteMascotaId) {
+                        console.warn(`Registro ${doc._id} marcado pending_update sin IDs remotos. Omitiendo.`);
+                        continue;
+                    }
+
+                    // ── Actualizar Persona ─────────────────────────────────────
+                    const resUpdatePersona = await fetch(
+                        `${ENV.API_URL}/api/v1/personas/${remotePersonaId}`,
+                        {
+                            method: 'PATCH',
+                            headers,
+                            body: JSON.stringify({
+                                nombres: doc.persona.nombres,
+                                apellidos: doc.persona.apellidos,
+                                tipoDocumento: doc.persona.tipoDocumento,
+                                documento: doc.persona.documento,
+                                direccion: doc.persona.direccion,
+                                telefono: doc.persona.telefono,
+                                ciudad: doc.persona.ciudad
+                            })
+                        }
+                    );
+                    if (!resUpdatePersona.ok) throw new Error(`HTTP Update Persona ${resUpdatePersona.status}`);
+
+                    // ── Actualizar Mascota ─────────────────────────────────────
+                    const fotoUpdateLocal = doc.mascota.fotografia;
+                    const fotoUpdateUrl =
+                        (fotoUpdateLocal && (fotoUpdateLocal.startsWith('http://') || fotoUpdateLocal.startsWith('https://')))
+                            ? fotoUpdateLocal
+                            : `https://via.placeholder.com/150?text=${encodeURIComponent(doc.mascota.nombre || 'Mascota')}`;
+
+                    const mascotaUpdateData = {
+                        nombre: doc.mascota.nombre,
+                        tipo: doc.mascota.tipo,
+                        genero: doc.mascota.genero,
+                        edad: doc.mascota.edad,
+                        fotografia: fotoUpdateUrl
+                    };
+
+                    const resUpdateMascota = await fetch(
+                        `${ENV.API_URL}/api/v1/mascotas/${remoteMascotaId}`,
+                        {
+                            method: 'PATCH',
+                            headers,
+                            body: JSON.stringify(mascotaUpdateData)
+                        }
+                    );
+                    if (!resUpdateMascota.ok) throw new Error(`HTTP Update Mascota ${resUpdateMascota.status}`);
+
+                    // ── Actualizar Censo ───────────────────────────────────────
+                    const resUpdateCenso = await fetch(
+                        `${ENV.API_URL}/api/v1/censos/${doc._id}`,
+                        {
+                            method: 'PATCH',
+                            headers,
+                            body: JSON.stringify({
+                                fotografia: doc.censo.fotografia,
+                                lat: doc.censo.lat,
+                                lon: doc.censo.lon
+                            })
+                        }
+                    );
+                    if (!resUpdateCenso.ok) throw new Error(`HTTP Update Censo ${resUpdateCenso.status}`);
+
+                    // Marcar como sincronizado
+                    const docActualizado = await this.db.get(doc._id);
+                    docActualizado.syncStatus = 'synced';
+                    await this.db.put(docActualizado);
+
                 } else if (doc.syncStatus === 'pending_delete') {
                     await this.db.remove(doc);
                 }
@@ -130,11 +348,11 @@ class SyncManager {
             const response = await fetch(`${ENV.API_URL}/api/v1/censos`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            
+
             if (!response.ok) throw new Error('Error al obtener censos');
-            
+
             const censos = await response.json();
-            
+
             for (const censo of censos) {
                 try {
                     await this.db.get(censo.id);
@@ -257,6 +475,50 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('mascotaForm').addEventListener('submit', manejarEnvioFormulario);
     document.getElementById('btnCancelarEdicion').addEventListener('click', cancelarEdicion);
 
+    // Agregar validación en tiempo real para campos numéricos
+    const documento = document.getElementById('documento');
+    const telefono = document.getElementById('telefono');
+    const edad = document.getElementById('edad');
+    const ciudad = document.getElementById('ciudad');
+    const ciudadManual = document.getElementById('ciudadManual');
+
+    if (documento) {
+        documento.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^\d]/g, '');
+        });
+    }
+
+    if (telefono) {
+        telefono.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^\d]/g, '');
+        });
+    }
+
+    if (edad) {
+        edad.addEventListener('input', (e) => {
+            // Permitir números y punto decimal
+            e.target.value = e.target.value.replace(/[^\d.]/g, '');
+            // Evitar múltiples puntos
+            if ((e.target.value.match(/\./g) || []).length > 1) {
+                e.target.value = e.target.value.replace(/\.+$/, '');
+            }
+        });
+    }
+
+    // Manejar cambio de ciudad
+    if (ciudad) {
+        ciudad.addEventListener('change', (e) => {
+            if (e.target.value === 'OTRA') {
+                ciudadManual.style.display = 'block';
+                ciudadManual.required = true;
+            } else {
+                ciudadManual.style.display = 'none';
+                ciudadManual.required = false;
+                ciudadManual.value = '';
+            }
+        });
+    }
+
     if (btnDesactivada) {
         btnDesactivada.addEventListener('click', function () {
             if (!swReg) return;
@@ -269,11 +531,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(subscription)
                         })
-                        .then(res => {
-                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                            verificarSuscripcion(true);
-                            showToast('Notificaciones activadas', 'success');
-                        }).catch(() => showToast('Error en servidor', 'error'));
+                            .then(res => {
+                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                                verificarSuscripcion(true);
+                                showToast('Notificaciones activadas', 'success');
+                            }).catch(() => showToast('Error en servidor', 'error'));
                     }).catch(() => showToast('Error de suscripción', 'error'));
             });
         });
@@ -313,9 +575,22 @@ function agregarMascota() {
     const documento = document.getElementById('documento')?.value.trim() || '';
     const direccion = document.getElementById('direccion')?.value.trim() || '';
     const telefono = document.getElementById('telefono')?.value.trim() || '';
-    const ciudad = document.getElementById('ciudad')?.value.trim() || '';
-    const usuario = document.getElementById('usuario')?.value.trim() || '';
-    const contrasena = document.getElementById('contrasena')?.value.trim() || '';
+
+    // Obtener ciudad (de select o input manual)
+    const ciudadSelect = document.getElementById('ciudad')?.value || '';
+    let ciudad = '';
+    if (ciudadSelect === 'OTRA') {
+        ciudad = document.getElementById('ciudadManual')?.value.trim() || '';
+    } else {
+        ciudad = ciudadSelect;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // DATOS DEL CENSO (Entidad: Censo) — se lee primero porque
+    // la misma foto base64 se reutiliza para la mascota
+    // ═══════════════════════════════════════════════════════════
+    const imgElement = document.getElementById('foto');
+    const fotoBase64 = imgElement && imgElement.src.startsWith('data:image') ? imgElement.src : null;
 
     // ═══════════════════════════════════════════════════════════
     // DATOS DE LA MASCOTA (Entidad: Mascota)
@@ -324,36 +599,72 @@ function agregarMascota() {
     const tipo = document.getElementById('tipo')?.value || '';
     const genero = document.getElementById('genero')?.value || '';
     const edad = parseFloat(document.getElementById('edad')?.value) || 0;
-    const fotografia = document.getElementById('fotografia')?.value.trim() || '';
-
-    // ═══════════════════════════════════════════════════════════
-    // DATOS DEL CENSO (Entidad: Censo)
-    // ═══════════════════════════════════════════════════════════
-    const imgElement = document.getElementById('foto');
-    const fotoBase64 = imgElement && imgElement.src.startsWith('data:image') ? imgElement.src : null;
+    const fotografia = fotoBase64 || '';
     const lat = window.latitudActual || null;
     const lon = window.longitudActual || null;
 
     // ═══════════════════════════════════════════════════════════
-    // VALIDACIONES
+    // VALIDACIONES DEL DUEÑO
     // ═══════════════════════════════════════════════════════════
-    if (!nombres || !apellidos || !tipoDocumento || !documento || !telefono || !direccion || !ciudad) {
-        showToast('Por favor completa todos los datos del dueño.', 'error');
+    const validacionesPersona = [
+        validarNombres(nombres),
+        validarApellidos(apellidos),
+        validarDocumento(documento),
+        validarTelefono(telefono),
+        validarCiudad(ciudad)
+    ];
+
+    for (let validacion of validacionesPersona) {
+        if (!validacion.valido) {
+            showToast(validacion.mensaje, 'error');
+            return;
+        }
+    }
+
+    if (!tipoDocumento) {
+        showToast('Por favor selecciona un tipo de documento', 'error');
         return;
     }
 
-    if (!nombre || !tipo || !genero || edad <= 0) {
-        showToast('Por favor completa todos los datos de la mascota.', 'error');
+    if (!direccion) {
+        showToast('La dirección es requerida', 'error');
         return;
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // VALIDACIONES DE LA MASCOTA
+    // ═══════════════════════════════════════════════════════════
+    if (!nombre || nombre.length < 2) {
+        showToast('El nombre de la mascota debe tener al menos 2 caracteres', 'error');
+        return;
+    }
+
+    if (!tipo) {
+        showToast('Por favor selecciona un tipo de mascota', 'error');
+        return;
+    }
+
+    if (!genero) {
+        showToast('Por favor selecciona un género', 'error');
+        return;
+    }
+
+    const validacionEdad = validarEdad(edad);
+    if (!validacionEdad.valido) {
+        showToast(validacionEdad.mensaje, 'error');
+        return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // VALIDACIONES DEL CENSO
+    // ═══════════════════════════════════════════════════════════
     if (!fotoBase64) {
-        showToast('Por favor toma una foto del censo.', 'error');
+        showToast('Por favor toma una foto del censo', 'error');
         return;
     }
 
     if (!lat || !lon) {
-        showToast('Por favor obtén la ubicación GPS.', 'error');
+        showToast('Por favor obtén la ubicación GPS', 'error');
         return;
     }
 
@@ -367,15 +678,6 @@ function agregarMascota() {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // ENCRIPTAR CONTRASEÑA SI EXISTE
-    // ═══════════════════════════════════════════════════════════
-    let contrasenaHash = '';
-    if (contrasena) {
-        const salt = bcrypt.genSaltSync(10);
-        contrasenaHash = bcrypt.hashSync(contrasena, salt);
-    }
-
-    // ═══════════════════════════════════════════════════════════
     // CONSTRUCCIÓN DEL REGISTRO COMPLETO
     // ═══════════════════════════════════════════════════════════
     const registroCompleto = {
@@ -383,7 +685,7 @@ function agregarMascota() {
         syncStatus: 'pending_create',
         idProyecto: ENV.ID_PROYECTO,
         color: ENV.COLOR,
-        
+
         persona: {
             id: crypto.randomUUID(),
             nombres,
@@ -392,11 +694,9 @@ function agregarMascota() {
             documento,
             direccion,
             telefono,
-            ciudad,
-            usuario,
-            contrasena: contrasenaHash
+            ciudad
         },
-        
+
         mascota: {
             id: crypto.randomUUID(),
             nombre,
@@ -405,7 +705,7 @@ function agregarMascota() {
             edad,
             fotografia
         },
-        
+
         censo: {
             lat,
             lon,
@@ -438,8 +738,6 @@ function actualizarMascota(id) {
     const direccion = document.getElementById('direccion')?.value.trim() || '';
     const telefono = document.getElementById('telefono')?.value.trim() || '';
     const ciudad = document.getElementById('ciudad')?.value.trim() || '';
-    const usuario = document.getElementById('usuario')?.value.trim() || '';
-    const contrasena = document.getElementById('contrasena')?.value.trim() || '';
 
     // Datos de la Mascota
     const nombre = document.getElementById('nombre')?.value.trim() || '';
@@ -462,8 +760,7 @@ function actualizarMascota(id) {
         doc.persona.direccion = direccion;
         doc.persona.telefono = telefono;
         doc.persona.ciudad = ciudad;
-        doc.persona.usuario = usuario;
-        
+
         // Encriptar contraseña si se proporciona
         if (contrasena) {
             const salt = bcrypt.genSaltSync(10);
@@ -508,7 +805,6 @@ function iniciarEdicion(id) {
         document.getElementById('direccion').value = doc.persona.direccion || '';
         document.getElementById('telefono').value = doc.persona.telefono || '';
         document.getElementById('ciudad').value = doc.persona.ciudad || '';
-        document.getElementById('usuario').value = doc.persona.usuario || '';
         // No cargamos la contraseña por seguridad
 
         // Cargar datos de la Mascota
@@ -568,12 +864,12 @@ async function cargarPersonas() {
         const response = await fetch(`${ENV.API_URL}/api/v1/personas`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-        
+
         if (!response.ok) throw new Error('Error al cargar personas');
-        
+
         const personas = await response.json();
         console.log('Personas cargadas (sin contraseñas):', personas);
-        
+
     } catch (error) {
         console.error('Error al cargar personas:', error);
     }
@@ -581,7 +877,7 @@ async function cargarPersonas() {
 
 function agregarFilaMascota(doc, tbody) {
     const fila = document.createElement('tr');
-    
+
     // Columna: Dueño
     const tdDueno = document.createElement('td');
     tdDueno.innerHTML = `
