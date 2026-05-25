@@ -1,11 +1,117 @@
 // auth.js - Autenticación JWT
 
+// Funciones de validación
+function soloNumeros(valor) {
+    return /^\d+$/.test(valor);
+}
+
+function validarDocumento(documento) {
+    if (!documento) {
+        return { valido: false, mensaje: 'El documento es requerido' };
+    }
+    if (!soloNumeros(documento)) {
+        return { valido: false, mensaje: 'El documento solo debe contener números' };
+    }
+    if (documento.length < 5 || documento.length > 15) {
+        return { valido: false, mensaje: 'El documento debe tener entre 5 y 15 dígitos' };
+    }
+    return { valido: true };
+}
+
+function validarTelefono(telefono) {
+    if (!telefono) {
+        return { valido: false, mensaje: 'El teléfono es requerido' };
+    }
+    if (!soloNumeros(telefono)) {
+        return { valido: false, mensaje: 'El teléfono solo debe contener números' };
+    }
+    if (telefono.length < 7 || telefono.length > 15) {
+        return { valido: false, mensaje: 'El teléfono debe tener entre 7 y 15 dígitos' };
+    }
+    return { valido: true };
+}
+
+function validarNombres(nombres) {
+    if (!nombres) {
+        return { valido: false, mensaje: 'Los nombres son requeridos' };
+    }
+    if (nombres.length < 2) {
+        return { valido: false, mensaje: 'Los nombres deben tener al menos 2 caracteres' };
+    }
+    return { valido: true };
+}
+
+function validarApellidos(apellidos) {
+    if (!apellidos) {
+        return { valido: false, mensaje: 'Los apellidos son requeridos' };
+    }
+    if (apellidos.length < 2) {
+        return { valido: false, mensaje: 'Los apellidos deben tener al menos 2 caracteres' };
+    }
+    return { valido: true };
+}
+
+function validarUsuario(usuario) {
+    if (!usuario) {
+        return { valido: false, mensaje: 'El usuario es requerido' };
+    }
+    if (usuario.length < 3) {
+        return { valido: false, mensaje: 'El usuario debe tener al menos 3 caracteres' };
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(usuario)) {
+        return { valido: false, mensaje: 'El usuario solo puede contener letras, números y guiones bajos' };
+    }
+    return { valido: true };
+}
+
+function validarContrasena(contrasena) {
+    if (!contrasena) {
+        return { valido: false, mensaje: 'La contraseña es requerida' };
+    }
+    if (contrasena.length < 6) {
+        return { valido: false, mensaje: 'La contraseña debe tener al menos 6 caracteres' };
+    }
+    return { valido: true };
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('loginForm');
     const registroForm = document.getElementById('registroForm');
     
     if (loginForm) loginForm.addEventListener('submit', handleLogin);
     if (registroForm) registroForm.addEventListener('submit', handleRegistro);
+    
+    // Agregar validación en tiempo real para campos numéricos
+    const regDocumento = document.getElementById('regDocumento');
+    const regTelefono = document.getElementById('regTelefono');
+    const regCiudad = document.getElementById('regCiudad');
+    const regCiudadManual = document.getElementById('regCiudadManual');
+    
+    if (regDocumento) {
+        regDocumento.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^\d]/g, '');
+        });
+    }
+    
+    if (regTelefono) {
+        regTelefono.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^\d]/g, '');
+        });
+    }
+    
+    // Manejar cambio de ciudad
+    if (regCiudad) {
+        regCiudad.addEventListener('change', (e) => {
+            if (e.target.value === 'OTRA') {
+                regCiudadManual.style.display = 'block';
+                regCiudadManual.required = true;
+            } else {
+                regCiudadManual.style.display = 'none';
+                regCiudadManual.required = false;
+                regCiudadManual.value = '';
+            }
+        });
+    }
 });
 
 function mostrarLogin() {
@@ -18,15 +124,6 @@ function mostrarRegistro() {
     document.getElementById('loginSection').style.display = 'none';
     document.getElementById('registroSection').style.display = 'block';
     document.getElementById('mensaje').innerHTML = '';
-}
-
-function modoDemo() {
-    localStorage.setItem('jwt_token', 'demo_token_12345');
-    localStorage.setItem('token_type', 'Bearer');
-    localStorage.setItem('token_expires', Date.now() + (3600 * 1000));
-    localStorage.setItem('usuario', 'demo');
-    localStorage.setItem('modo_demo', 'true');
-    window.location.href = 'index.html';
 }
 
 async function handleLogin(e) {
@@ -55,7 +152,6 @@ async function handleLogin(e) {
         localStorage.setItem('token_type', data.tipoToken || 'Bearer');
         localStorage.setItem('token_expires', Date.now() + (data.expiraEn * 1000));
         localStorage.setItem('usuario', usuario);
-        localStorage.removeItem('modo_demo');
         
         mostrarMensaje('Login exitoso. Redirigiendo...', 'success');
         
@@ -78,19 +174,49 @@ async function handleRegistro(e) {
     const documento = document.getElementById('regDocumento').value.trim();
     const direccion = document.getElementById('regDireccion').value.trim();
     const telefono = document.getElementById('regTelefono').value.trim();
-    const ciudad = document.getElementById('regCiudad').value.trim();
+    
+    // Obtener ciudad (de select o input manual)
+    const ciudadSelect = document.getElementById('regCiudad').value;
+    let ciudad = '';
+    if (ciudadSelect === 'OTRA') {
+        ciudad = document.getElementById('regCiudadManual').value.trim();
+    } else {
+        ciudad = ciudadSelect;
+    }
+    
     const usuario = document.getElementById('regUsuario').value.trim();
     const contrasena = document.getElementById('regContrasena').value.trim();
     
-    if (!nombres || !apellidos || !documento || !usuario || !contrasena) {
-        mostrarMensaje('Por favor completa todos los campos obligatorios', 'danger');
+    // Validar todos los campos
+    const validaciones = [
+        validarNombres(nombres),
+        validarApellidos(apellidos),
+        validarDocumento(documento),
+        validarTelefono(telefono),
+        validarUsuario(usuario),
+        validarContrasena(contrasena)
+    ];
+    
+    // Validar que ciudad no esté vacía
+    if (!ciudad) {
+        mostrarMensaje('Por favor selecciona o digita una ciudad', 'danger');
         return;
     }
     
+    if (!direccion) {
+        mostrarMensaje('La dirección es requerida', 'danger');
+        return;
+    }
+    
+    // Verificar si hay errores de validación
+    for (let validacion of validaciones) {
+        if (!validacion.valido) {
+            mostrarMensaje(validacion.mensaje, 'danger');
+            return;
+        }
+    }
+    
     try {
-        const salt = bcrypt.genSaltSync(10);
-        const contrasenaHash = bcrypt.hashSync(contrasena, salt);
-        
         const persona = {
             id: crypto.randomUUID(),
             nombres,
@@ -101,7 +227,7 @@ async function handleRegistro(e) {
             telefono,
             ciudad,
             usuario,
-            contrasena: contrasenaHash
+            contrasena
         };
         
         const response = await fetch(`${ENV.API_URL}/api/v1/personas`, {
@@ -131,11 +257,7 @@ function mostrarMensaje(texto, tipo) {
 
 function verificarAuth() {
     const token = localStorage.getItem('jwt_token');
-    const expira = localStorage.getItem('token_expires');
-    const modoDemo = localStorage.getItem('modo_demo');
-    
-    if (modoDemo === 'true') return;
-    
+    const expira = localStorage.getItem('token_expires');    
     if (!token || (expira && Date.now() > parseInt(expira))) {
         if (!window.location.pathname.includes('login.html')) {
             localStorage.clear();
