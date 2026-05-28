@@ -681,13 +681,11 @@ function agregarMascota() {
     // CONSTRUCCIÓN DEL REGISTRO COMPLETO
     // ═══════════════════════════════════════════════════════════
     const registroCompleto = {
-        _id: crypto.randomUUID(),
         syncStatus: 'pending_create',
         idProyecto: ENV.ID_PROYECTO,
         color: ENV.COLOR,
 
         persona: {
-            id: crypto.randomUUID(),
             nombres,
             apellidos,
             tipoDocumento,
@@ -698,7 +696,6 @@ function agregarMascota() {
         },
 
         mascota: {
-            id: crypto.randomUUID(),
             nombre,
             tipo,
             genero,

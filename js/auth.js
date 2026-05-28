@@ -74,6 +74,19 @@ function validarContrasena(contrasena) {
     return { valido: true };
 }
 
+function togglePasswordVisibility(inputId, buttonId) {
+    const input = document.getElementById(inputId);
+    const button = document.getElementById(buttonId);
+    
+    if (input.type === 'password') {
+        input.type = 'text';
+        button.innerHTML = '<i class="fas fa-eye-slash"></i>';
+    } else {
+        input.type = 'password';
+        button.innerHTML = '<i class="fas fa-eye"></i>';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('loginForm');
     const registroForm = document.getElementById('registroForm');
@@ -218,7 +231,6 @@ async function handleRegistro(e) {
     
     try {
         const persona = {
-            id: crypto.randomUUID(),
             nombres,
             apellidos,
             tipoDocumento,
