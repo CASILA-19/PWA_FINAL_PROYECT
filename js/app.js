@@ -6,6 +6,23 @@ let btnActivada = null;
 let btnDesactivada = null;
 
 // ═══════════════════════════════════════════════════════════
+// FUNCIONES DEL MENÚ LATERAL
+// ═══════════════════════════════════════════════════════════
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+function scrollToSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // FUNCIONES DE VALIDACIÓN
 // ═══════════════════════════════════════════════════════════
 function soloNumeros(valor) {
@@ -126,7 +143,10 @@ class SyncManager {
         } finally {
             this.syncing = false;
             this._setSyncingUI(false);
-            cargarMascotas();
+            // Solo cargar mascotas si estamos en la página correcta
+            if (document.getElementById('mascotasTbody')) {
+                cargarMascotas();
+            }
         }
     }
 
@@ -713,7 +733,7 @@ function agregarMascota() {
     // ═══════════════════════════════════════════════════════════
     // GUARDAR EN POUCHDB
     // ═══════════════════════════════════════════════════════════
-    db.put(registroCompleto)
+    db.post(registroCompleto)
         .then(() => {
             limpiarFormulario();
             cargarMascotas();
@@ -835,6 +855,13 @@ function limpiarFormulario() {
 
 function cargarMascotas() {
     const tbody = document.getElementById('mascotasTbody');
+    
+    // Si el elemento no existe (no estamos en la página correcta), salir
+    if (!tbody) {
+        console.log('cargarMascotas: elemento mascotasTbody no encontrado, omitiendo...');
+        return;
+    }
+    
     tbody.innerHTML = '';
 
     db.allDocs({ include_docs: true }).then(result => {
