@@ -409,33 +409,15 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarCensos();
 
     // Configurar botones de notificaciones
-    const btnActivada = document.getElementById('btnActivarNotificaciones');
-    const btnDesactivada = document.getElementById('btnDesactivarNotificaciones');
+    const btnActivarNotificaciones = document.getElementById('btnActivarNotificaciones');
+    const btnDesactivarNotificaciones = document.getElementById('btnDesactivarNotificaciones');
 
-    if (btnDesactivada) {
-        btnDesactivada.addEventListener('click', function () {
-            if (!window.swReg) return;
-            getPublicKey().then(key => {
-                window.swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
-                    .then(res => res.toJSON())
-                    .then(subscription => {
-                        fetch(`${ENV.API_URL}/notificaciones/subscribe`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(subscription)
-                        })
-                            .then(res => {
-                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                                verificarSuscripcion(true);
-                                showToast('Notificaciones activadas', 'success');
-                            }).catch(() => showToast('Error en servidor', 'error'));
-                    }).catch(() => showToast('Error de suscripción', 'error'));
-            });
-        });
+    if (btnActivarNotificaciones) {
+        btnActivarNotificaciones.addEventListener('click', suscribirNotificaciones);
     }
 
-    if (btnActivada) {
-        btnActivada.addEventListener('click', () => cancelarSuscripcion());
+    if (btnDesactivarNotificaciones) {
+        btnDesactivarNotificaciones.addEventListener('click', cancelarSuscripcion);
     }
 
     setTimeout(() => {
@@ -823,51 +805,9 @@ window.toggleSidebar = function() {
     overlay.classList.toggle('active');
 }
 
-window.verificarSuscripcion = function(activadas) {
-    const statusBadge = document.getElementById('notificationStatus');
-    if (statusBadge) {
-        if (activadas) {
-            statusBadge.textContent = 'Activadas';
-            statusBadge.className = 'badge bg-success';
-            document.getElementById('btnDesactivarNotificaciones').style.display = 'inline-block';
-            document.getElementById('btnActivarNotificaciones').style.display = 'none';
-        } else {
-            statusBadge.textContent = 'Desactivadas';
-            statusBadge.className = 'badge bg-secondary';
-            document.getElementById('btnDesactivarNotificaciones').style.display = 'none';
-            document.getElementById('btnActivarNotificaciones').style.display = 'inline-block';
-        }
-    }
-}
-
-function cancelarSuscripcion() {
-    if (!window.swReg) return;
-    window.swReg.pushManager.getSubscription().then(subscription => {
-        if (subscription) {
-            return subscription.unsubscribe().then(() => {
-                return fetch(`${ENV.API_URL}/notificaciones/unsubscribe`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(subscription)
-                });
-            }).then(() => {
-                verificarSuscripcion(false);
-                showToast('Notificaciones desactivadas', 'info');
-            }).catch(() => showToast('Error al desactivar notificaciones', 'error'));
-        } else {
-            verificarSuscripcion(false);
-        }
-    });
-}
-
-function getPublicKey() {
-    return fetch(`${ENV.API_URL}/notificaciones/key`)
-        .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.text();
-        })
-        .then(key => urlBase64ToUint8Array(key));
-}
+// ═══════════════════════════════════════════════════════════
+// FUNCIONES DE NOTIFICACIONES PUSH
+// ═══════════════════════════════════════════════════════════
 
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -878,6 +818,114 @@ function urlBase64ToUint8Array(base64String) {
         outputArray[i] = rawData.charCodeAt(i);
     }
     return outputArray;
+}
+
+async function obtenerVAPIDKey() {
+    try {
+        const response = await fetch(`${ENV.API_URL}/api/v1/push/key`);
+        if (!response.ok) {
+            throw new Error(`Error al obtener VAPID key: ${response.status}`);
+        }
+        const data = await response.json();
+        return data.publicKey;
+    } catch (error) {
+        console.error('Error obteniendo VAPID key:', error);
+        throw error;
+    }
+}
+
+async function suscribirNotificaciones() {
+    if (!window.swReg) {
+        showToast('Service Worker no está listo', 'error');
+        return;
+    }
+
+    try {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            showToast('Permiso de notificaciones denegado', 'warning');
+            return;
+        }
+
+        // Esperar a que el Service Worker esté activo
+        await navigator.serviceWorker.ready;
+
+        const publicKey = await obtenerVAPIDKey();
+        const applicationServerKey = urlBase64ToUint8Array(publicKey);
+
+        let subscription = await window.swReg.pushManager.getSubscription();
+        
+        if (!subscription) {
+            subscription = await window.swReg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: applicationServerKey
+            });
+        }
+
+        const token = localStorage.getItem('jwt_token');
+        const response = await fetch(`${ENV.API_URL}/api/v1/push/subscriptions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(subscription)
+        });
+
+        if (response.status === 204 || response.ok) {
+            verificarSuscripcion(true);
+            showToast('Notificaciones activadas correctamente', 'success');
+        } else {
+            throw new Error(`Error al guardar suscripción: ${response.status}`);
+        }
+
+    } catch (error) {
+        console.error('Error al suscribir notificaciones:', error);
+        showToast('Error al activar notificaciones: ' + error.message, 'error');
+    }
+}
+
+async function cancelarSuscripcion() {
+    if (!window.swReg) {
+        showToast('Service Worker no está listo', 'error');
+        return;
+    }
+
+    try {
+        const subscription = await window.swReg.pushManager.getSubscription();
+        
+        if (subscription) {
+            await subscription.unsubscribe();
+            verificarSuscripcion(false);
+            showToast('Notificaciones desactivadas', 'info');
+        } else {
+            verificarSuscripcion(false);
+            showToast('No hay suscripción activa', 'info');
+        }
+    } catch (error) {
+        console.error('Error al cancelar suscripción:', error);
+        showToast('Error al desactivar notificaciones', 'error');
+    }
+}
+
+window.verificarSuscripcion = function(activadas) {
+    const statusBadge = document.getElementById('notificationStatus');
+    const btnActivar = document.getElementById('btnActivarNotificaciones');
+    const btnDesactivar = document.getElementById('btnDesactivarNotificaciones');
+    
+    if (statusBadge) {
+        if (activadas) {
+            statusBadge.textContent = 'Activadas';
+            statusBadge.className = 'badge bg-success';
+            if (btnActivar) btnActivar.style.display = 'none';
+            if (btnDesactivar) btnDesactivar.style.display = 'inline-block';
+        } else {
+            statusBadge.textContent = 'Desactivadas';
+            statusBadge.className = 'badge bg-secondary';
+            if (btnActivar) btnActivar.style.display = 'inline-block';
+            if (btnDesactivar) btnDesactivar.style.display = 'none';
+        }
+    }
 }
 
 window.logout = function() {

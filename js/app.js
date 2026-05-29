@@ -2,8 +2,8 @@ let db;
 let syncManager;
 let mascotaEnEdicionId = null;
 let swReg = null;
-let btnActivada = null;
-let btnDesactivada = null;
+let btnActivarNotificaciones = null;
+let btnDesactivarNotificaciones = null;
 
 // ═══════════════════════════════════════════════════════════
 // FUNCIONES DEL MENÚ LATERAL
@@ -444,38 +444,20 @@ function verificarSuscripcion(activadas) {
         if (activadas) {
             statusBadge.textContent = 'Activadas';
             statusBadge.className = 'badge bg-success';
-            btnDesactivada.style.display = 'inline-block';
-            btnActivada.style.display = 'none';
+            if (btnActivarNotificaciones) btnActivarNotificaciones.style.display = 'none';
+            if (btnDesactivarNotificaciones) btnDesactivarNotificaciones.style.display = 'inline-block';
         } else {
             statusBadge.textContent = 'Desactivadas';
             statusBadge.className = 'badge bg-secondary';
-            btnDesactivada.style.display = 'none';
-            btnActivada.style.display = 'inline-block';
+            if (btnActivarNotificaciones) btnActivarNotificaciones.style.display = 'inline-block';
+            if (btnDesactivarNotificaciones) btnDesactivarNotificaciones.style.display = 'none';
         }
     }
 }
 
-function enviarNotificacion() {
-    const notificationOptions = {
-        body: "¡Gracias por usar nuestra aplicación!",
-        icon: "/img/logo.jpg",
-    };
-    new Notification("¡Notificación de GeoMapFoto!", notificationOptions);
-}
-
-function notificarme() {
-    if (!("Notification" in window)) {
-        alert("Tu navegador no soporta notificaciones.");
-        return;
-    }
-    if (Notification.permission === "granted") {
-        enviarNotificacion();
-    } else if (Notification.permission !== "denied" || Notification.permission === "default") {
-        Notification.requestPermission().then(permission => {
-            if (permission === "granted") enviarNotificacion();
-        });
-    }
-}
+// ═══════════════════════════════════════════════════════════
+// FUNCIONES DE NOTIFICACIONES PUSH
+// ═══════════════════════════════════════════════════════════
 
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -488,33 +470,130 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
-function getPublicKey() {
-    return fetch(`${ENV.API_URL}/notificaciones/key`)
-        .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.text();
-        })
-        .then(key => urlBase64ToUint8Array(key));
+async function obtenerVAPIDKey() {
+    try {
+        const response = await fetch(`${ENV.API_URL}/api/v1/push/key`);
+        if (!response.ok) {
+            throw new Error(`Error al obtener VAPID key: ${response.status}`);
+        }
+        const data = await response.json();
+        return data.publicKey;
+    } catch (error) {
+        console.error('Error obteniendo VAPID key:', error);
+        throw error;
+    }
 }
 
-function cancelarSuscripcion() {
-    if (!swReg) return;
-    swReg.pushManager.getSubscription().then(subscription => {
+async function suscribirNotificaciones() {
+    console.log('=== suscribirNotificaciones iniciada ===');
+    console.log('swReg:', swReg);
+    
+    if (!swReg) {
+        console.error('Service Worker no está listo');
+        showToast('Service Worker no está listo', 'error');
+        return;
+    }
+
+    try {
+        console.log('Solicitando permiso de notificaciones...');
+        const permission = await Notification.requestPermission();
+        console.log('Permiso obtenido:', permission);
+        
+        if (permission !== 'granted') {
+            showToast('Permiso de notificaciones denegado', 'warning');
+            return;
+        }
+
+        // IMPORTANTE: Esperar a que el Service Worker esté activo
+        console.log('Esperando a que el Service Worker esté activo...');
+        await navigator.serviceWorker.ready;
+        console.log('Service Worker está activo y listo');
+
+        console.log('Obteniendo clave VAPID...');
+        const publicKey = await obtenerVAPIDKey();
+        console.log('Clave VAPID obtenida:', publicKey.substring(0, 20) + '...');
+        
+        const applicationServerKey = urlBase64ToUint8Array(publicKey);
+
+        console.log('Verificando suscripción existente...');
+        let subscription = await swReg.pushManager.getSubscription();
+        
+        if (!subscription) {
+            console.log('Creando nueva suscripción...');
+            subscription = await swReg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: applicationServerKey
+            });
+            console.log('Suscripción creada:', subscription);
+        } else {
+            console.log('Suscripción existente encontrada:', subscription);
+        }
+
+        const token = localStorage.getItem('jwt_token');
+        console.log('Token JWT:', token ? 'Presente' : 'No encontrado');
+        
+        console.log('Enviando suscripción al servidor...');
+        const response = await fetch(`${ENV.API_URL}/api/v1/push/subscriptions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(subscription)
+        });
+
+        console.log('Respuesta del servidor:', response.status);
+        
+        if (response.status === 204 || response.ok) {
+            verificarSuscripcion(true);
+            showToast('Notificaciones activadas correctamente', 'success');
+            console.log('=== Suscripción completada exitosamente ===');
+        } else {
+            const errorText = await response.text();
+            console.error('Error del servidor:', errorText);
+            throw new Error(`Error al guardar suscripción: ${response.status}`);
+        }
+
+    } catch (error) {
+        console.error('Error al suscribir notificaciones:', error);
+        showToast('Error al activar notificaciones: ' + error.message, 'error');
+    }
+}
+
+async function cancelarSuscripcion() {
+    if (!swReg) {
+        showToast('Service Worker no está listo', 'error');
+        return;
+    }
+
+    try {
+        const subscription = await swReg.pushManager.getSubscription();
+        
         if (subscription) {
-            return subscription.unsubscribe().then(() => {
-                return fetch(`${ENV.API_URL}/notificaciones/unsubscribe`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(subscription)
-                });
-            }).then(() => {
-                verificarSuscripcion(false);
-                showToast('Notificaciones desactivadas', 'info');
-            }).catch(() => showToast('Error al desactivar notificaciones', 'error'));
+            // Desuscribir del navegador
+            await subscription.unsubscribe();
+            
+            // Opcional: notificar al servidor (si tienes un endpoint para ello)
+            // const token = localStorage.getItem('jwt_token');
+            // await fetch(`${ENV.API_URL}/api/v1/push/subscriptions`, {
+            //     method: 'DELETE',
+            //     headers: {
+            //         'Content-Type': 'application/json',
+            //         'Authorization': `Bearer ${token}`
+            //     },
+            //     body: JSON.stringify(subscription)
+            // });
+            
+            verificarSuscripcion(false);
+            showToast('Notificaciones desactivadas', 'info');
         } else {
             verificarSuscripcion(false);
+            showToast('No hay suscripción activa', 'info');
         }
-    });
+    } catch (error) {
+        console.error('Error al cancelar suscripción:', error);
+        showToast('Error al desactivar notificaciones', 'error');
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -527,8 +606,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('usuarioActual').textContent = `👤 ${usuario}`;
     }
 
-    btnActivada = document.getElementById('btnActivarNotificaciones');
-    btnDesactivada = document.getElementById('btnDesactivarNotificaciones');
+    btnActivarNotificaciones = document.getElementById('btnActivarNotificaciones');
+    btnDesactivarNotificaciones = document.getElementById('btnDesactivarNotificaciones');
 
     document.getElementById('mascotaForm').addEventListener('submit', manejarEnvioFormulario);
     document.getElementById('btnCancelarEdicion').addEventListener('click', cancelarEdicion);
@@ -577,36 +656,40 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (btnDesactivada) {
-        btnDesactivada.addEventListener('click', function () {
-            if (!swReg) return;
-            getPublicKey().then(key => {
-                swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
-                    .then(res => res.toJSON())
-                    .then(subscription => {
-                        fetch(`${ENV.API_URL}/notificaciones/subscribe`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(subscription)
-                        })
-                            .then(res => {
-                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                                verificarSuscripcion(true);
-                                showToast('Notificaciones activadas', 'success');
-                            }).catch(() => showToast('Error en servidor', 'error'));
-                    }).catch(() => showToast('Error de suscripción', 'error'));
-            });
+    // ═══════════════════════════════════════════════════════════
+    // CONFIGURAR BOTONES DE NOTIFICACIONES
+    // ═══════════════════════════════════════════════════════════
+    console.log('Configurando botones de notificaciones...');
+    console.log('btnActivarNotificaciones:', btnActivarNotificaciones);
+    console.log('btnDesactivarNotificaciones:', btnDesactivarNotificaciones);
+    
+    if (btnActivarNotificaciones) {
+        console.log('Agregando listener al botón Activar');
+        btnActivarNotificaciones.addEventListener('click', () => {
+            console.log('Click en botón Activar detectado!');
+            suscribirNotificaciones();
         });
+    } else {
+        console.error('No se encontró el botón btnActivarNotificaciones');
     }
 
-    if (btnActivada) {
-        btnActivada.addEventListener('click', () => cancelarSuscripcion());
+    if (btnDesactivarNotificaciones) {
+        console.log('Agregando listener al botón Desactivar');
+        btnDesactivarNotificaciones.addEventListener('click', () => {
+            console.log('Click en botón Desactivar detectado!');
+            cancelarSuscripcion();
+        });
+    } else {
+        console.error('No se encontró el botón btnDesactivarNotificaciones');
     }
 
+    // Verificar estado de suscripción cuando el SW esté listo
     setTimeout(() => {
         if (window.swReg) {
             swReg = window.swReg;
-            swReg.pushManager.getSubscription().then(sub => verificarSuscripcion(!!sub));
+            swReg.pushManager.getSubscription().then(sub => {
+                verificarSuscripcion(!!sub);
+            });
         }
     }, 100);
 
