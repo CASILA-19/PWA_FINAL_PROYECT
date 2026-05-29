@@ -173,10 +173,25 @@ class SyncManagerCensos {
                         })
                     });
                     if (!resCenso.ok) throw new Error(`HTTP Censo ${resCenso.status}`);
+                    
+                    const censoCreado = await resCenso.json();
+                    const remoteCensoId = censoCreado.id;
 
-                    const docFinal = await this.db.get(doc._id);
-                    docFinal.syncStatus = 'synced';
-                    await this.db.put(docFinal);
+                    // Eliminar el documento local temporal
+                    await this.db.remove(doc);
+                    
+                    // Crear nuevo documento con el ID remoto del censo
+                    await this.db.put({
+                        _id: remoteCensoId,
+                        syncStatus: 'synced',
+                        idProyecto: doc.idProyecto,
+                        color: doc.color,
+                        remotePersonaId: personaId,
+                        remoteMascotaId: mascotaId,
+                        persona: doc.persona,
+                        mascota: doc.mascota,
+                        censo: doc.censo
+                    });
 
                 } else if (doc.syncStatus === 'pending_update') {
                     const remotePersonaId = doc.remotePersonaId;
@@ -269,9 +284,34 @@ class SyncManagerCensos {
 
             for (const censo of censos) {
                 try {
-                    await this.db.get(censo.id);
+                    // Intentar obtener el documento existente
+                    const existingDoc = await this.db.get(censo.id);
+                    
+                    // Actualizar el documento existente con los datos del servidor
+                    // Preservar datos locales si los del servidor están incompletos
+                    await this.db.put({
+                        ...existingDoc,
+                        _id: censo.id,
+                        _rev: existingDoc._rev,
+                        syncStatus: 'synced',
+                        idProyecto: censo.idProyecto,
+                        color: censo.color,
+                        // Preservar datos de persona si existen localmente y son más completos
+                        persona: (existingDoc.persona && existingDoc.persona.direccion) 
+                            ? existingDoc.persona 
+                            : censo.dueno,
+                        mascota: censo.mascota,
+                        censo: {
+                            lat: censo.lat,
+                            lon: censo.lon,
+                            fotografia: censo.fotografiaCenso || existingDoc.censo?.fotografia
+                        },
+                        remotePersonaId: censo.idDueno,
+                        remoteMascotaId: censo.idMascota
+                    });
                 } catch (err) {
                     if (err.status === 404) {
+                        // Solo crear si no existe
                         await this.db.put({
                             _id: censo.id,
                             syncStatus: 'synced',
@@ -416,16 +456,56 @@ async function cargarCensos() {
         const result = await db.allDocs({ include_docs: true });
         console.log('Documentos obtenidos:', result.rows.length);
         
-        allCensos = result.rows
+        // Filtrar documentos válidos
+        const censosValidos = result.rows
             .map(r => r.doc)
-            .filter(doc => doc.persona && doc.mascota && doc.censo)
+            .filter(doc => doc.persona && doc.mascota && doc.censo);
+        
+        console.log('Censos válidos antes de deduplicar:', censosValidos.length);
+        
+        // Eliminar duplicados basándose en datos únicos (documento del dueño + nombre de mascota + timestamp similar)
+        const censosUnicos = new Map();
+        
+        for (const censo of censosValidos) {
+            // Crear una clave única basada en datos del censo
+            const documento = censo.persona?.documento || '';
+            const nombreMascota = censo.mascota?.nombre || '';
+            const tipo = censo.mascota?.tipo || '';
+            const edad = censo.mascota?.edad || '';
+            
+            // Clave única para identificar duplicados
+            const claveUnica = `${documento}-${nombreMascota}-${tipo}-${edad}`;
+            
+            // Si ya existe un censo con esta clave, mantener el que tenga syncStatus 'synced'
+            // o el que tenga un ID más largo (los IDs del servidor son más largos)
+            if (censosUnicos.has(claveUnica)) {
+                const censoExistente = censosUnicos.get(claveUnica);
+                
+                // Priorizar el censo sincronizado o con ID del servidor (más largo)
+                if (censo.syncStatus === 'synced' && censoExistente.syncStatus !== 'synced') {
+                    censosUnicos.set(claveUnica, censo);
+                } else if (censo._id.length > censoExistente._id.length) {
+                    censosUnicos.set(claveUnica, censo);
+                }
+                // Si ambos están sincronizados, mantener el que tiene ID más largo (del servidor)
+                else if (censo.syncStatus === 'synced' && censoExistente.syncStatus === 'synced') {
+                    if (censo._id.length > censoExistente._id.length) {
+                        censosUnicos.set(claveUnica, censo);
+                    }
+                }
+            } else {
+                censosUnicos.set(claveUnica, censo);
+            }
+        }
+        
+        allCensos = Array.from(censosUnicos.values())
             .sort((a, b) => {
                 const fechaA = a.timestamp || 0;
                 const fechaB = b.timestamp || 0;
                 return fechaB - fechaA;
             });
 
-        console.log('Censos válidos encontrados:', allCensos.length);
+        console.log('Censos únicos después de deduplicar:', allCensos.length);
         
         // Mostrar algunos datos de ejemplo para debug
         if (allCensos.length > 0) {
@@ -434,7 +514,8 @@ async function cargarCensos() {
                 dueño: allCensos[0].persona?.nombres,
                 mascota: allCensos[0].mascota?.nombre,
                 tipo: allCensos[0].mascota?.tipo,
-                edad: allCensos[0].mascota?.edad
+                edad: allCensos[0].mascota?.edad,
+                syncStatus: allCensos[0].syncStatus
             });
         }
 
@@ -550,11 +631,8 @@ function renderizarTabla() {
             <td>${edad}</td>
             <td><span class="badge ${estadoClass}">${estado}</span></td>
             <td class="text-center">
-                <button class="btn btn-sm btn-outline-primary me-1" onclick="verDetalles('${censo._id}')" title="Ver detalles">
+                <button class="btn btn-sm btn-outline-primary" onclick="verDetalles('${censo._id}')" title="Ver detalles">
                     <i class="fas fa-eye"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-warning" onclick="editarCenso('${censo._id}')" title="Editar">
-                    <i class="fas fa-edit"></i>
                 </button>
             </td>
         `;
@@ -636,11 +714,93 @@ function previousPage() {
 // ═══════════════════════════════════════════════════════════
 window.verDetalles = function(censoId) {
     const censo = allCensos.find(c => c._id === censoId);
-    if (censo) {
-        // Aquí puedes implementar un modal o redirigir a una página de detalles
-        console.log('Detalles del censo:', censo);
-        showToast(`Detalles de ${censo.mascota?.nombre || 'mascota'}`, 'info');
+    if (!censo) {
+        showToast('Censo no encontrado', 'error');
+        return;
     }
+    
+    // Crear modal con detalles
+    const nombreDueno = `${censo.persona?.nombres || ''} ${censo.persona?.apellidos || ''}`.trim();
+    const tipoDocumento = censo.persona?.tipoDocumento || 'N/A';
+    const documento = censo.persona?.documento || 'N/A';
+    const telefono = censo.persona?.telefono || 'N/A';
+    const direccion = censo.persona?.direccion || 'N/A';
+    const ciudad = censo.persona?.ciudad || 'N/A';
+    
+    const nombreMascota = censo.mascota?.nombre || 'N/A';
+    const tipo = censo.mascota?.tipo || 'N/A';
+    const genero = censo.mascota?.genero || 'N/A';
+    const edad = censo.mascota?.edad || 'N/A';
+    
+    const fotoCenso = censo.censo?.fotografia || '';
+    const lat = censo.censo?.lat || 'N/A';
+    const lon = censo.censo?.lon || 'N/A';
+    
+    const modalHTML = `
+        <div class="modal fade" id="detalleModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-paw me-2"></i>Detalles del Censo
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6 class="text-primary"><i class="fas fa-user me-2"></i>Datos del Dueño</h6>
+                                <p><strong>Nombre:</strong> ${nombreDueno}</p>
+                                <p><strong>Documento:</strong> ${tipoDocumento} ${documento}</p>
+                                <p><strong>Teléfono:</strong> ${telefono}</p>
+                                <p><strong>Dirección:</strong> ${direccion}</p>
+                                <p><strong>Ciudad:</strong> ${ciudad}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <h6 class="text-primary"><i class="fas fa-paw me-2"></i>Datos de la Mascota</h6>
+                                <p><strong>Nombre:</strong> ${nombreMascota}</p>
+                                <p><strong>Tipo:</strong> ${tipo}</p>
+                                <p><strong>Género:</strong> ${genero}</p>
+                                <p><strong>Edad:</strong> ${edad} años</p>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <h6 class="text-primary"><i class="fas fa-camera me-2"></i>Foto del Censo</h6>
+                                ${fotoCenso ? `<img src="${fotoCenso}" class="img-fluid rounded" alt="Foto del censo" style="max-height: 400px; object-fit: contain;">` : '<p class="text-muted">Sin foto</p>'}
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <h6 class="text-primary"><i class="fas fa-map-marker-alt me-2"></i>Ubicación</h6>
+                                <p><strong>Latitud:</strong> ${lat}</p>
+                                <p><strong>Longitud:</strong> ${lon}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Eliminar modal anterior si existe
+    const oldModal = document.getElementById('detalleModal');
+    if (oldModal) oldModal.remove();
+    
+    // Agregar modal al DOM
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Mostrar modal
+    const modal = new bootstrap.Modal(document.getElementById('detalleModal'));
+    modal.show();
+    
+    // Limpiar modal al cerrar
+    document.getElementById('detalleModal').addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
 }
 
 // ═══════════════════════════════════════════════════════════

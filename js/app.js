@@ -274,10 +274,25 @@ class SyncManager {
                         })
                     });
                     if (!resCenso.ok) throw new Error(`HTTP Censo ${resCenso.status}`);
+                    
+                    const censoCreado = await resCenso.json();
+                    const remoteCensoId = censoCreado.id;
 
-                    const docFinal = await this.db.get(doc._id);
-                    docFinal.syncStatus = 'synced';
-                    await this.db.put(docFinal);
+                    // Eliminar el documento local temporal
+                    await this.db.remove(doc);
+                    
+                    // Crear nuevo documento con el ID remoto del censo
+                    await this.db.put({
+                        _id: remoteCensoId,
+                        syncStatus: 'synced',
+                        idProyecto: doc.idProyecto,
+                        color: doc.color,
+                        remotePersonaId: personaId,
+                        remoteMascotaId: mascotaId,
+                        persona: doc.persona,
+                        mascota: doc.mascota,
+                        censo: doc.censo
+                    });
 
                 } else if (doc.syncStatus === 'pending_update') {
 
@@ -375,9 +390,32 @@ class SyncManager {
 
             for (const censo of censos) {
                 try {
-                    await this.db.get(censo.id);
+                    // Intentar obtener el documento existente
+                    const existingDoc = await this.db.get(censo.id);
+                    
+                    // Actualizar el documento existente con los datos del servidor
+                    // Preservar datos locales si los del servidor están incompletos
+                    await this.db.put({
+                        ...existingDoc,
+                        _id: censo.id,
+                        _rev: existingDoc._rev,
+                        syncStatus: 'synced',
+                        idProyecto: censo.idProyecto,
+                        color: censo.color,
+                        // Preservar datos de persona si existen localmente y son más completos
+                        persona: (existingDoc.persona && existingDoc.persona.direccion) 
+                            ? existingDoc.persona 
+                            : censo.dueno,
+                        mascota: censo.mascota,
+                        censo: {
+                            lat: censo.lat,
+                            lon: censo.lon,
+                            fotografia: censo.fotografiaCenso || existingDoc.censo?.fotografia
+                        }
+                    });
                 } catch (err) {
                     if (err.status === 404) {
+                        // Solo crear si no existe
                         await this.db.put({
                             _id: censo.id,
                             syncStatus: 'synced',

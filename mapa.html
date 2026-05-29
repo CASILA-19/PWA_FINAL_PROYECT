@@ -16,29 +16,97 @@
     </style>
 </head>
 <body>
+    <!-- ── Navbar ─────────────────────────────────────── -->
     <nav class="navbar navbar-expand-lg">
         <div class="container-fluid">
+            <button class="btn btn-outline-primary me-2" id="btnMenuToggle" onclick="toggleSidebar()">
+                <i class="fas fa-bars"></i>
+            </button>
             <a class="navbar-brand" href="index.html">
-                <img src="img/logo.jpg" alt="Logo">
+                <img src="img/logo.jpg" alt="Logo Mascotas">
                 Mascotas PROPWA_001
             </a>
             <div class="ms-auto d-flex align-items-center gap-2">
-                <a href="index.html" class="btn btn-sm btn-outline-primary">
-                    <i class="fas fa-home me-1"></i>Inicio
-                </a>
-                <button class="btn btn-sm btn-outline-danger" onclick="logout()">
-                    <i class="fas fa-sign-out-alt me-1"></i>Salir
+                <span id="usuarioActual" class="badge bg-primary"></span>
+                <div class="vr"></div>
+                <span id="syncStatus" class="badge bg-secondary">Comprobando...</span>
+                <button id="btnSync" class="btn btn-sm btn-outline-primary" onclick="syncManager.sync()">
+                    <i class="fas fa-rotate me-1"></i>Sincronizar
+                </button>
+                <div class="vr"></div>
+                <span id="notificationStatus" class="badge bg-secondary">Desactivadas</span>
+                <button id="btnActivarNotificaciones" class="btn btn-sm btn-success"
+                    title="Activar notificaciones push">
+                    <i class="fas fa-bell me-1"></i>Activar
+                </button>
+                <button id="btnDesactivarNotificaciones" class="btn btn-sm btn-danger" style="display:none;"
+                    title="Desactivar notificaciones push">
+                    <i class="fas fa-bell-slash me-1"></i>Desactivar
                 </button>
             </div>
         </div>
     </nav>
 
+    <!-- ── Menú Lateral Desplegable ─────────────────────────────────────── -->
+    <div id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h5>Menú</h5>
+            <button class="btn-close" onclick="toggleSidebar()"></button>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="index.html" class="sidebar-link">
+                <i class="fas fa-clipboard-list"></i> Registrar Censo
+            </a>
+            <a href="mapa.html" class="sidebar-link active">
+                <i class="fas fa-map"></i> Ver Mapa
+            </a>
+            <a href="censos.html" class="sidebar-link">
+                <i class="fas fa-list"></i> Lista de Censos
+            </a>
+            <hr>
+            <button class="btn btn-sm btn-outline-danger w-100" onclick="logout()">
+                <i class="fas fa-sign-out-alt me-1"></i>Salir
+            </button>
+        </nav>
+    </div>
+
+    <!-- ── Overlay para cerrar sidebar ─────────────────────────────────────── -->
+    <div id="sidebarOverlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
     <div id="mapaCensos"></div>
 
+    <!-- Toast container -->
+    <div id="toastContainer"></div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pouchdb@9.0.0/dist/pouchdb.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/map-censos.js"></script>
     <script>verificarAuth();</script>
+
+    <!-- Registro del Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => {
+                        console.log('[SW] Registrado:', reg.scope);
+                        window.swReg = reg;
+
+                        // Verificar suscripción existente
+                        reg.pushManager.getSubscription().then(subscription => {
+                            if (subscription) {
+                                console.log('Suscripción existente encontrada:', subscription);
+                                if (window.verificarSuscripcion) {
+                                    window.verificarSuscripcion(true);
+                                }
+                            }
+                        });
+                    })
+                    .catch(err => console.error('[SW] Error al registrar:', err));
+            });
+        }
+    </script>
 </body>
 </html>
