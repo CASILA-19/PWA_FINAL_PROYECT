@@ -2,8 +2,25 @@ let db;
 let syncManager;
 let mascotaEnEdicionId = null;
 let swReg = null;
-let btnActivada = null;
-let btnDesactivada = null;
+let btnActivarNotificaciones = null;
+let btnDesactivarNotificaciones = null;
+
+// ═══════════════════════════════════════════════════════════
+// FUNCIONES DEL MENÚ LATERAL
+// ═══════════════════════════════════════════════════════════
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+function scrollToSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
 
 // ═══════════════════════════════════════════════════════════
 // FUNCIONES DE VALIDACIÓN
@@ -126,7 +143,10 @@ class SyncManager {
         } finally {
             this.syncing = false;
             this._setSyncingUI(false);
-            cargarMascotas();
+            // Solo cargar mascotas si estamos en la página correcta
+            if (document.getElementById('mascotasTbody')) {
+                cargarMascotas();
+            }
         }
     }
 
@@ -143,6 +163,8 @@ class SyncManager {
         const result = await this.db.allDocs({ include_docs: true });
         const pending = result.rows.filter(r => r.doc.syncStatus && r.doc.syncStatus !== 'synced');
 
+        console.log(`[SyncUp] Encontrados ${pending.length} documentos pendientes de sincronizar`);
+
         const token = localStorage.getItem('jwt_token') || '';
         const headers = {
             'Content-Type': 'application/json',
@@ -151,8 +173,20 @@ class SyncManager {
 
         for (const row of pending) {
             const doc = row.doc;
+            console.log(`[SyncUp] Procesando documento ${doc._id} con estado: ${doc.syncStatus}`);
+            
             try {
                 if (doc.syncStatus === 'pending_create') {
+                    
+                    // VALIDACIÓN: Si el documento ya tiene IDs remotos completos, 
+                    // probablemente ya fue sincronizado y solo falta marcar como synced
+                    if (doc.remotePersonaId && doc.remoteMascotaId && doc._id.length > 20) {
+                        console.log(`[SyncUp] Documento ${doc._id} parece ya sincronizado, marcando como synced`);
+                        const docActual = await this.db.get(doc._id);
+                        docActual.syncStatus = 'synced';
+                        await this.db.put(docActual);
+                        continue;
+                    }
 
                     // ── PASO 1: Registrar Persona ──────────────────
                     let personaId = doc.remotePersonaId || null;
@@ -240,6 +274,7 @@ class SyncManager {
 
 
                     // ── PASO 3: Registrar Censo ────────────────────────────────
+                    console.log(`[SyncUp] Creando censo en servidor con personaId: ${personaId}, mascotaId: ${mascotaId}`);
                     const resCenso = await fetch(`${ENV.API_URL}/api/v1/censos`, {
                         method: 'POST',
                         headers,
@@ -254,10 +289,29 @@ class SyncManager {
                         })
                     });
                     if (!resCenso.ok) throw new Error(`HTTP Censo ${resCenso.status}`);
+                    
+                    const censoCreado = await resCenso.json();
+                    const remoteCensoId = censoCreado.id;
+                    console.log(`[SyncUp] Censo creado en servidor con ID: ${remoteCensoId}`);
 
-                    const docFinal = await this.db.get(doc._id);
-                    docFinal.syncStatus = 'synced';
-                    await this.db.put(docFinal);
+                    // Eliminar el documento local temporal
+                    console.log(`[SyncUp] Eliminando documento temporal local: ${doc._id}`);
+                    await this.db.remove(doc);
+                    
+                    // Crear nuevo documento con el ID remoto del censo
+                    console.log(`[SyncUp] Creando documento local con ID del servidor: ${remoteCensoId}`);
+                    await this.db.put({
+                        _id: remoteCensoId,
+                        syncStatus: 'synced',
+                        idProyecto: doc.idProyecto,
+                        color: doc.color,
+                        remotePersonaId: personaId,
+                        remoteMascotaId: mascotaId,
+                        persona: doc.persona,
+                        mascota: doc.mascota,
+                        censo: doc.censo
+                    });
+                    console.log(`[SyncUp] Censo ${remoteCensoId} sincronizado exitosamente`);
 
                 } else if (doc.syncStatus === 'pending_update') {
 
@@ -355,14 +409,40 @@ class SyncManager {
 
             for (const censo of censos) {
                 try {
-                    await this.db.get(censo.id);
+                    // Intentar obtener el documento existente
+                    const existingDoc = await this.db.get(censo.id);
+                    
+                    // Actualizar el documento existente con los datos del servidor
+                    // IMPORTANTE: Preservar los IDs remotos para evitar duplicados
+                    await this.db.put({
+                        ...existingDoc,
+                        _id: censo.id,
+                        _rev: existingDoc._rev,
+                        syncStatus: 'synced',
+                        idProyecto: censo.idProyecto,
+                        color: censo.color,
+                        remotePersonaId: censo.idDueno,  // ← CRÍTICO: guardar ID remoto
+                        remoteMascotaId: censo.idMascota, // ← CRÍTICO: guardar ID remoto
+                        persona: (existingDoc.persona && existingDoc.persona.direccion) 
+                            ? existingDoc.persona 
+                            : censo.dueno,
+                        mascota: censo.mascota,
+                        censo: {
+                            lat: censo.lat,
+                            lon: censo.lon,
+                            fotografia: censo.fotografiaCenso || existingDoc.censo?.fotografia
+                        }
+                    });
                 } catch (err) {
                     if (err.status === 404) {
+                        // Solo crear si no existe
                         await this.db.put({
                             _id: censo.id,
                             syncStatus: 'synced',
                             idProyecto: censo.idProyecto,
                             color: censo.color,
+                            remotePersonaId: censo.idDueno,  // ← CRÍTICO: guardar ID remoto
+                            remoteMascotaId: censo.idMascota, // ← CRÍTICO: guardar ID remoto
                             persona: censo.dueno,
                             mascota: censo.mascota,
                             censo: {
@@ -386,38 +466,20 @@ function verificarSuscripcion(activadas) {
         if (activadas) {
             statusBadge.textContent = 'Activadas';
             statusBadge.className = 'badge bg-success';
-            btnDesactivada.style.display = 'inline-block';
-            btnActivada.style.display = 'none';
+            if (btnActivarNotificaciones) btnActivarNotificaciones.style.display = 'none';
+            if (btnDesactivarNotificaciones) btnDesactivarNotificaciones.style.display = 'inline-block';
         } else {
             statusBadge.textContent = 'Desactivadas';
             statusBadge.className = 'badge bg-secondary';
-            btnDesactivada.style.display = 'none';
-            btnActivada.style.display = 'inline-block';
+            if (btnActivarNotificaciones) btnActivarNotificaciones.style.display = 'inline-block';
+            if (btnDesactivarNotificaciones) btnDesactivarNotificaciones.style.display = 'none';
         }
     }
 }
 
-function enviarNotificacion() {
-    const notificationOptions = {
-        body: "¡Gracias por usar nuestra aplicación!",
-        icon: "/img/logo.jpg",
-    };
-    new Notification("¡Notificación de GeoMapFoto!", notificationOptions);
-}
-
-function notificarme() {
-    if (!("Notification" in window)) {
-        alert("Tu navegador no soporta notificaciones.");
-        return;
-    }
-    if (Notification.permission === "granted") {
-        enviarNotificacion();
-    } else if (Notification.permission !== "denied" || Notification.permission === "default") {
-        Notification.requestPermission().then(permission => {
-            if (permission === "granted") enviarNotificacion();
-        });
-    }
-}
+// ═══════════════════════════════════════════════════════════
+// FUNCIONES DE NOTIFICACIONES PUSH
+// ═══════════════════════════════════════════════════════════
 
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -430,33 +492,106 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
-function getPublicKey() {
-    return fetch(`${ENV.API_URL}/notificaciones/key`)
-        .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.text();
-        })
-        .then(key => urlBase64ToUint8Array(key));
+async function obtenerVAPIDKey() {
+    try {
+        const response = await fetch(`${ENV.API_URL}/api/v1/push/key`);
+        if (!response.ok) {
+            throw new Error(`Error al obtener VAPID key: ${response.status}`);
+        }
+        const data = await response.json();
+        return data.publicKey;
+    } catch (error) {
+        console.error('Error obteniendo VAPID key:', error);
+        throw error;
+    }
 }
 
-function cancelarSuscripcion() {
-    if (!swReg) return;
-    swReg.pushManager.getSubscription().then(subscription => {
+async function suscribirNotificaciones() {
+    if (!swReg) {
+        showToast('Service Worker no está listo', 'error');
+        return;
+    }
+
+    try {
+        const permission = await Notification.requestPermission();
+        
+        if (permission !== 'granted') {
+            showToast('Permiso de notificaciones denegado', 'warning');
+            return;
+        }
+
+        // Esperar a que el Service Worker esté activo
+        await navigator.serviceWorker.ready;
+
+        const publicKey = await obtenerVAPIDKey();
+        const applicationServerKey = urlBase64ToUint8Array(publicKey);
+
+        let subscription = await swReg.pushManager.getSubscription();
+        
+        if (!subscription) {
+            subscription = await swReg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: applicationServerKey
+            });
+        }
+
+        const token = localStorage.getItem('jwt_token');
+        const response = await fetch(`${ENV.API_URL}/api/v1/push/subscriptions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(subscription)
+        });
+        
+        if (response.status === 204 || response.ok) {
+            verificarSuscripcion(true);
+            showToast('Notificaciones activadas correctamente', 'success');
+        } else {
+            throw new Error(`Error al guardar suscripción: ${response.status}`);
+        }
+
+    } catch (error) {
+        console.error('Error al suscribir notificaciones:', error);
+        showToast('Error al activar notificaciones: ' + error.message, 'error');
+    }
+}
+
+async function cancelarSuscripcion() {
+    if (!swReg) {
+        showToast('Service Worker no está listo', 'error');
+        return;
+    }
+
+    try {
+        const subscription = await swReg.pushManager.getSubscription();
+        
         if (subscription) {
-            return subscription.unsubscribe().then(() => {
-                return fetch(`${ENV.API_URL}/notificaciones/unsubscribe`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(subscription)
-                });
-            }).then(() => {
-                verificarSuscripcion(false);
-                showToast('Notificaciones desactivadas', 'info');
-            }).catch(() => showToast('Error al desactivar notificaciones', 'error'));
+            // Desuscribir del navegador
+            await subscription.unsubscribe();
+            
+            // Opcional: notificar al servidor (si tienes un endpoint para ello)
+            // const token = localStorage.getItem('jwt_token');
+            // await fetch(`${ENV.API_URL}/api/v1/push/subscriptions`, {
+            //     method: 'DELETE',
+            //     headers: {
+            //         'Content-Type': 'application/json',
+            //         'Authorization': `Bearer ${token}`
+            //     },
+            //     body: JSON.stringify(subscription)
+            // });
+            
+            verificarSuscripcion(false);
+            showToast('Notificaciones desactivadas', 'info');
         } else {
             verificarSuscripcion(false);
+            showToast('No hay suscripción activa', 'info');
         }
-    });
+    } catch (error) {
+        console.error('Error al cancelar suscripción:', error);
+        showToast('Error al desactivar notificaciones', 'error');
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -469,8 +604,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('usuarioActual').textContent = `👤 ${usuario}`;
     }
 
-    btnActivada = document.getElementById('btnActivarNotificaciones');
-    btnDesactivada = document.getElementById('btnDesactivarNotificaciones');
+    btnActivarNotificaciones = document.getElementById('btnActivarNotificaciones');
+    btnDesactivarNotificaciones = document.getElementById('btnDesactivarNotificaciones');
 
     document.getElementById('mascotaForm').addEventListener('submit', manejarEnvioFormulario);
     document.getElementById('btnCancelarEdicion').addEventListener('click', cancelarEdicion);
@@ -519,36 +654,28 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (btnDesactivada) {
-        btnDesactivada.addEventListener('click', function () {
-            if (!swReg) return;
-            getPublicKey().then(key => {
-                swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
-                    .then(res => res.toJSON())
-                    .then(subscription => {
-                        fetch(`${ENV.API_URL}/notificaciones/subscribe`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(subscription)
-                        })
-                            .then(res => {
-                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                                verificarSuscripcion(true);
-                                showToast('Notificaciones activadas', 'success');
-                            }).catch(() => showToast('Error en servidor', 'error'));
-                    }).catch(() => showToast('Error de suscripción', 'error'));
-            });
+    // ═══════════════════════════════════════════════════════════
+    // CONFIGURAR BOTONES DE NOTIFICACIONES
+    // ═══════════════════════════════════════════════════════════
+    if (btnActivarNotificaciones) {
+        btnActivarNotificaciones.addEventListener('click', () => {
+            suscribirNotificaciones();
         });
     }
 
-    if (btnActivada) {
-        btnActivada.addEventListener('click', () => cancelarSuscripcion());
+    if (btnDesactivarNotificaciones) {
+        btnDesactivarNotificaciones.addEventListener('click', () => {
+            cancelarSuscripcion();
+        });
     }
 
+    // Verificar estado de suscripción cuando el SW esté listo
     setTimeout(() => {
         if (window.swReg) {
             swReg = window.swReg;
-            swReg.pushManager.getSubscription().then(sub => verificarSuscripcion(!!sub));
+            swReg.pushManager.getSubscription().then(sub => {
+                verificarSuscripcion(!!sub);
+            });
         }
     }, 100);
 
@@ -681,13 +808,11 @@ function agregarMascota() {
     // CONSTRUCCIÓN DEL REGISTRO COMPLETO
     // ═══════════════════════════════════════════════════════════
     const registroCompleto = {
-        _id: crypto.randomUUID(),
         syncStatus: 'pending_create',
         idProyecto: ENV.ID_PROYECTO,
         color: ENV.COLOR,
 
         persona: {
-            id: crypto.randomUUID(),
             nombres,
             apellidos,
             tipoDocumento,
@@ -698,7 +823,6 @@ function agregarMascota() {
         },
 
         mascota: {
-            id: crypto.randomUUID(),
             nombre,
             tipo,
             genero,
@@ -716,7 +840,7 @@ function agregarMascota() {
     // ═══════════════════════════════════════════════════════════
     // GUARDAR EN POUCHDB
     // ═══════════════════════════════════════════════════════════
-    db.put(registroCompleto)
+    db.post(registroCompleto)
         .then(() => {
             limpiarFormulario();
             cargarMascotas();
@@ -838,6 +962,13 @@ function limpiarFormulario() {
 
 function cargarMascotas() {
     const tbody = document.getElementById('mascotasTbody');
+    
+    // Si el elemento no existe (no estamos en la página correcta), salir
+    if (!tbody) {
+        console.log('cargarMascotas: elemento mascotasTbody no encontrado, omitiendo...');
+        return;
+    }
+    
     tbody.innerHTML = '';
 
     db.allDocs({ include_docs: true }).then(result => {
