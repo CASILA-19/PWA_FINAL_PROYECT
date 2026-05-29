@@ -33,23 +33,32 @@
                 <img src="img/logo.jpg" alt="Logo Mascotas">
                 Mascotas PROPWA_001
             </a>
-            <div class="ms-auto d-flex align-items-center gap-2">
-                <span id="usuarioActual" class="badge bg-primary"></span>
-                <div class="vr"></div>
-                <span id="syncStatus" class="badge bg-secondary">Comprobando...</span>
-                <button id="btnSync" class="btn btn-sm btn-outline-primary" onclick="syncManager.sync()">
-                    <i class="fas fa-rotate me-1"></i>Sincronizar
-                </button>
-                <div class="vr"></div>
-                <span id="notificationStatus" class="badge bg-secondary">Desactivadas</span>
-                <button id="btnActivarNotificaciones" class="btn btn-sm btn-success"
-                    title="Activar notificaciones push">
-                    <i class="fas fa-bell me-1"></i>Activar
-                </button>
-                <button id="btnDesactivarNotificaciones" class="btn btn-sm btn-danger" style="display:none;"
-                    title="Desactivar notificaciones push">
-                    <i class="fas fa-bell-slash me-1"></i>Desactivar
-                </button>
+            <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
+                <!-- Usuario -->
+                <div class="navbar-item">
+                    <span id="usuarioActual" class="badge bg-primary"></span>
+                </div>
+                
+                <!-- Sincronización -->
+                <div class="navbar-item navbar-sync">
+                    <span id="syncStatus" class="badge bg-secondary">Comprobando...</span>
+                    <button id="btnSync" class="btn btn-sm btn-outline-primary" onclick="syncManager.sync()">
+                        <i class="fas fa-rotate me-1"></i><span class="btn-text">Sincronizar</span>
+                    </button>
+                </div>
+                
+                <!-- Notificaciones -->
+                <div class="navbar-item navbar-notifications">
+                    <span id="notificationStatus" class="badge bg-secondary">Desactivadas</span>
+                    <button id="btnActivarNotificaciones" class="btn btn-sm btn-success"
+                        title="Activar notificaciones push">
+                        <i class="fas fa-bell"></i><span class="btn-text ms-1">Activar</span>
+                    </button>
+                    <button id="btnDesactivarNotificaciones" class="btn btn-sm btn-danger" style="display:none;"
+                        title="Desactivar notificaciones push">
+                        <i class="fas fa-bell-slash"></i><span class="btn-text ms-1">Desactivar</span>
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
