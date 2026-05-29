@@ -163,6 +163,8 @@ class SyncManager {
         const result = await this.db.allDocs({ include_docs: true });
         const pending = result.rows.filter(r => r.doc.syncStatus && r.doc.syncStatus !== 'synced');
 
+        console.log(`[SyncUp] Encontrados ${pending.length} documentos pendientes de sincronizar`);
+
         const token = localStorage.getItem('jwt_token') || '';
         const headers = {
             'Content-Type': 'application/json',
@@ -171,8 +173,20 @@ class SyncManager {
 
         for (const row of pending) {
             const doc = row.doc;
+            console.log(`[SyncUp] Procesando documento ${doc._id} con estado: ${doc.syncStatus}`);
+            
             try {
                 if (doc.syncStatus === 'pending_create') {
+                    
+                    // VALIDACIÓN: Si el documento ya tiene IDs remotos completos, 
+                    // probablemente ya fue sincronizado y solo falta marcar como synced
+                    if (doc.remotePersonaId && doc.remoteMascotaId && doc._id.length > 20) {
+                        console.log(`[SyncUp] Documento ${doc._id} parece ya sincronizado, marcando como synced`);
+                        const docActual = await this.db.get(doc._id);
+                        docActual.syncStatus = 'synced';
+                        await this.db.put(docActual);
+                        continue;
+                    }
 
                     // ── PASO 1: Registrar Persona ──────────────────
                     let personaId = doc.remotePersonaId || null;
@@ -260,6 +274,7 @@ class SyncManager {
 
 
                     // ── PASO 3: Registrar Censo ────────────────────────────────
+                    console.log(`[SyncUp] Creando censo en servidor con personaId: ${personaId}, mascotaId: ${mascotaId}`);
                     const resCenso = await fetch(`${ENV.API_URL}/api/v1/censos`, {
                         method: 'POST',
                         headers,
@@ -277,11 +292,14 @@ class SyncManager {
                     
                     const censoCreado = await resCenso.json();
                     const remoteCensoId = censoCreado.id;
+                    console.log(`[SyncUp] Censo creado en servidor con ID: ${remoteCensoId}`);
 
                     // Eliminar el documento local temporal
+                    console.log(`[SyncUp] Eliminando documento temporal local: ${doc._id}`);
                     await this.db.remove(doc);
                     
                     // Crear nuevo documento con el ID remoto del censo
+                    console.log(`[SyncUp] Creando documento local con ID del servidor: ${remoteCensoId}`);
                     await this.db.put({
                         _id: remoteCensoId,
                         syncStatus: 'synced',
@@ -293,6 +311,7 @@ class SyncManager {
                         mascota: doc.mascota,
                         censo: doc.censo
                     });
+                    console.log(`[SyncUp] Censo ${remoteCensoId} sincronizado exitosamente`);
 
                 } else if (doc.syncStatus === 'pending_update') {
 
@@ -394,7 +413,7 @@ class SyncManager {
                     const existingDoc = await this.db.get(censo.id);
                     
                     // Actualizar el documento existente con los datos del servidor
-                    // Preservar datos locales si los del servidor están incompletos
+                    // IMPORTANTE: Preservar los IDs remotos para evitar duplicados
                     await this.db.put({
                         ...existingDoc,
                         _id: censo.id,
@@ -402,7 +421,8 @@ class SyncManager {
                         syncStatus: 'synced',
                         idProyecto: censo.idProyecto,
                         color: censo.color,
-                        // Preservar datos de persona si existen localmente y son más completos
+                        remotePersonaId: censo.idDueno,  // ← CRÍTICO: guardar ID remoto
+                        remoteMascotaId: censo.idMascota, // ← CRÍTICO: guardar ID remoto
                         persona: (existingDoc.persona && existingDoc.persona.direccion) 
                             ? existingDoc.persona 
                             : censo.dueno,
@@ -421,6 +441,8 @@ class SyncManager {
                             syncStatus: 'synced',
                             idProyecto: censo.idProyecto,
                             color: censo.color,
+                            remotePersonaId: censo.idDueno,  // ← CRÍTICO: guardar ID remoto
+                            remoteMascotaId: censo.idMascota, // ← CRÍTICO: guardar ID remoto
                             persona: censo.dueno,
                             mascota: censo.mascota,
                             censo: {
@@ -485,54 +507,35 @@ async function obtenerVAPIDKey() {
 }
 
 async function suscribirNotificaciones() {
-    console.log('=== suscribirNotificaciones iniciada ===');
-    console.log('swReg:', swReg);
-    
     if (!swReg) {
-        console.error('Service Worker no está listo');
         showToast('Service Worker no está listo', 'error');
         return;
     }
 
     try {
-        console.log('Solicitando permiso de notificaciones...');
         const permission = await Notification.requestPermission();
-        console.log('Permiso obtenido:', permission);
         
         if (permission !== 'granted') {
             showToast('Permiso de notificaciones denegado', 'warning');
             return;
         }
 
-        // IMPORTANTE: Esperar a que el Service Worker esté activo
-        console.log('Esperando a que el Service Worker esté activo...');
+        // Esperar a que el Service Worker esté activo
         await navigator.serviceWorker.ready;
-        console.log('Service Worker está activo y listo');
 
-        console.log('Obteniendo clave VAPID...');
         const publicKey = await obtenerVAPIDKey();
-        console.log('Clave VAPID obtenida:', publicKey.substring(0, 20) + '...');
-        
         const applicationServerKey = urlBase64ToUint8Array(publicKey);
 
-        console.log('Verificando suscripción existente...');
         let subscription = await swReg.pushManager.getSubscription();
         
         if (!subscription) {
-            console.log('Creando nueva suscripción...');
             subscription = await swReg.pushManager.subscribe({
                 userVisibleOnly: true,
                 applicationServerKey: applicationServerKey
             });
-            console.log('Suscripción creada:', subscription);
-        } else {
-            console.log('Suscripción existente encontrada:', subscription);
         }
 
         const token = localStorage.getItem('jwt_token');
-        console.log('Token JWT:', token ? 'Presente' : 'No encontrado');
-        
-        console.log('Enviando suscripción al servidor...');
         const response = await fetch(`${ENV.API_URL}/api/v1/push/subscriptions`, {
             method: 'POST',
             headers: {
@@ -541,16 +544,11 @@ async function suscribirNotificaciones() {
             },
             body: JSON.stringify(subscription)
         });
-
-        console.log('Respuesta del servidor:', response.status);
         
         if (response.status === 204 || response.ok) {
             verificarSuscripcion(true);
             showToast('Notificaciones activadas correctamente', 'success');
-            console.log('=== Suscripción completada exitosamente ===');
         } else {
-            const errorText = await response.text();
-            console.error('Error del servidor:', errorText);
             throw new Error(`Error al guardar suscripción: ${response.status}`);
         }
 
@@ -659,28 +657,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // ═══════════════════════════════════════════════════════════
     // CONFIGURAR BOTONES DE NOTIFICACIONES
     // ═══════════════════════════════════════════════════════════
-    console.log('Configurando botones de notificaciones...');
-    console.log('btnActivarNotificaciones:', btnActivarNotificaciones);
-    console.log('btnDesactivarNotificaciones:', btnDesactivarNotificaciones);
-    
     if (btnActivarNotificaciones) {
-        console.log('Agregando listener al botón Activar');
         btnActivarNotificaciones.addEventListener('click', () => {
-            console.log('Click en botón Activar detectado!');
             suscribirNotificaciones();
         });
-    } else {
-        console.error('No se encontró el botón btnActivarNotificaciones');
     }
 
     if (btnDesactivarNotificaciones) {
-        console.log('Agregando listener al botón Desactivar');
         btnDesactivarNotificaciones.addEventListener('click', () => {
-            console.log('Click en botón Desactivar detectado!');
             cancelarSuscripcion();
         });
-    } else {
-        console.error('No se encontró el botón btnDesactivarNotificaciones');
     }
 
     // Verificar estado de suscripción cuando el SW esté listo
