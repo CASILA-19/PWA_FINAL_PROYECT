@@ -113,8 +113,16 @@ class SyncManager {
     }
 
     _setupListeners() {
-        window.addEventListener('online', () => { this._updateStatus(); this.sync(); });
-        window.addEventListener('offline', () => this._updateStatus());
+        window.addEventListener('online', () => { 
+            this._updateStatus(); 
+            this.sync(true); 
+        });
+        
+        window.addEventListener('offline', () => {
+            this._updateStatus();
+            showToast('Sin conexión: Los registros se guardarán localmente', 'warning');
+        });
+        
         this._updateStatus();
     }
 
@@ -130,20 +138,33 @@ class SyncManager {
         }
     }
 
-    async sync() {
+    async sync(triggeredByReconnection = false) {
         if (this.syncing || !navigator.onLine) return;
         this.syncing = true;
         this._setSyncingUI(true);
+
         try {
+            const result = await this.db.allDocs({ include_docs: true });
+            const pendingCount = result.rows.filter(r => r.doc.syncStatus && r.doc.syncStatus !== 'synced').length;
+
             await this.syncUp();
             await this.syncDown();
+
+            if (triggeredByReconnection && pendingCount > 0 && Notification.permission === 'granted' && swReg) {
+                swReg.showNotification('¡Sincronización Exitosa!', {
+                    body: `Se han guardado ${pendingCount} registro(s) que hiciste sin conexión.`,
+                    icon: '/img/logo.jpg',
+                    badge: '/favicon.ico',
+                    vibrate: [200, 100, 200]
+                });
+            }
+
         } catch (err) {
             console.error('Error de sincronización:', err);
             showToast('Error al sincronizar con el servidor.', 'error');
         } finally {
             this.syncing = false;
             this._setSyncingUI(false);
-            // Solo cargar mascotas si estamos en la página correcta
             if (document.getElementById('mascotasTbody')) {
                 cargarMascotas();
             }
