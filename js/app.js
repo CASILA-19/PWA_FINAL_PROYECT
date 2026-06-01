@@ -193,7 +193,7 @@ class SyncManager {
         };
 
         for (const row of pending) {
-            const doc = row.doc;
+            let doc = row.doc;
             console.log(`[SyncUp] Procesando documento ${doc._id} con estado: ${doc.syncStatus}`);
             
             try {
