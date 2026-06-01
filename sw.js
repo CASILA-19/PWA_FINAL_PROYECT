@@ -76,25 +76,21 @@ self.addEventListener('fetch', (e) => {
 
     if (e.request.mode === 'navigate' || (e.request.headers.get('accept') && e.request.headers.get('accept').includes('text/html'))) {
         e.respondWith(
-            fetch(e.request)
-                .then(networkResponse => {
-                    
-                    const respuestaParaCache = networkResponse.clone();
-
-                    
+            caches.match(e.request).then(cachedResponse => {
+                
+                const fetchPromise = fetch(e.request).then(networkResponse => {
+                    const clone = networkResponse.clone();
                     caches.open(CACHE_DYNAMIC).then(cache => {
-                        cache.put(e.request, respuestaParaCache);
+                        cache.put(e.request, clone);
                     });
-
                     return networkResponse;
-                })
-                .catch(() => {
-                    return caches.match(e.request).then(cachedResponse => {
-                        return cachedResponse || caches.match('/index.html');
-                    });
-                })
+                }).catch(() => {
+                    return caches.match('/index.html');
+                });
+                return cachedResponse || fetchPromise;
+            })
         );
-        return;
+        return; 
     }
 
     e.respondWith(
