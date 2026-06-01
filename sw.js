@@ -1,5 +1,5 @@
 
-const VERSION = 'v4';
+const VERSION = 'v6';
 const CACHE_STATIC = `mascotas-static-${VERSION}`;
 const CACHE_DYNAMIC = `mascotas-dynamic-${VERSION}`;
 
