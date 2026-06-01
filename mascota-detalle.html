@@ -152,51 +152,9 @@
     <script src="https://cdn.jsdelivr.net/npm/pouchdb@9.0.0/dist/pouchdb.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/auth.js"></script>
-    <script src="js/app.js"></script> <script>
-        if(typeof verificarAuth === 'function') verificarAuth();
-
-        document.addEventListener('DOMContentLoaded', async () => {
-            const parametros = new URLSearchParams(window.location.search);
-            const idCenso = parametros.get('idCenso');
-
-            const uiCargando = document.getElementById('cargando');
-            const uiInfo = document.getElementById('infoMascota');
-            const uiError = document.getElementById('mensajeError');
-
-            if (!idCenso) {
-                uiCargando.style.display = 'none';
-                uiError.style.display = 'block';
-                return;
-            }
-
-            try {
-                const dbLocal = new PouchDB('mascotasDB');
-                const doc = await dbLocal.get(idCenso);
-
-                document.getElementById('nombreMascota').textContent = doc.mascota.nombre || 'Desconocido';
-                document.getElementById('badgeTipo').textContent = doc.mascota.tipo || 'N/A';
-                document.getElementById('generoMascota').textContent = doc.mascota.genero || 'N/A';
-                document.getElementById('edadMascota').textContent = doc.mascota.edad || '0';
-                
-                if (doc.mascota.fotografia && doc.mascota.fotografia.length > 10) {
-                    document.getElementById('fotoMascota').src = doc.mascota.fotografia;
-                }
-
-                document.getElementById('nombreDueno').textContent = `${doc.persona.nombres || ''} ${doc.persona.apellidos || ''}`;
-                document.getElementById('telDueno').textContent = doc.persona.telefono || 'Sin registro';
-                document.getElementById('docDueno').textContent = `${doc.persona.tipoDocumento || ''} ${doc.persona.documento || ''}`;
-                document.getElementById('dirDueno').textContent = `${doc.persona.direccion || ''}, ${doc.persona.ciudad || ''}`;
-
-                uiCargando.style.display = 'none';
-                uiInfo.style.display = 'block';
-
-            } catch (error) {
-                console.error('Error al buscar el censo:', error);
-                uiCargando.style.display = 'none';
-                uiError.style.display = 'block';
-            }
-        });
-    </script>
+    <script src="js/app.js"></script>
+    <script>verificarAuth();</script>
+    
     <!-- Registro del Service Worker -->
     <script>
         if ('serviceWorker' in navigator) {
