@@ -1,6 +1,4 @@
-// Service Worker para notificaciones push y Offline Support
 
-// 1. CAMBIAMOS LA VERSIÓN PARA FORZAR LA ACTUALIZACIÓN
 const VERSION = 'v4';
 const CACHE_STATIC = `mascotas-static-${VERSION}`;
 const CACHE_DYNAMIC = `mascotas-dynamic-${VERSION}`;
@@ -25,6 +23,7 @@ self.addEventListener('install', (e) => {
         '/login.html',
         '/censos.html',
         '/mapa.html',
+        '/mascota-detalle.html',
         '/manifest.json',
         '/css/styles.css',
         '/js/app.js',
@@ -40,7 +39,6 @@ self.addEventListener('install', (e) => {
         '/img/perrito.jpg'
     ];
 
-    // 2. HACEMOS EL CACHÉ RESISTENTE A ERRORES
     const cacheStatic = caches.open(CACHE_STATIC).then(cache => {
         return Promise.all(
             archivosEstaticos.map(url => {
@@ -72,45 +70,42 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-    // 1. Peticiones a la API: Siempre van directamente a internet
     if (e.request.url.includes('/api/')) {
         return e.respondWith(fetch(e.request)); 
     }
 
-    // 2. NETWORK FIRST para archivos HTML (Vistas como index.html, mapa.html, etc.)
     if (e.request.mode === 'navigate' || (e.request.headers.get('accept') && e.request.headers.get('accept').includes('text/html'))) {
         e.respondWith(
             fetch(e.request)
                 .then(networkResponse => {
-                    // Si hay internet, servimos la página nueva y actualizamos el caché dinámico
-                    return caches.open(CACHE_DYNAMIC).then(cache => {
-                        cache.put(e.request, networkResponse.clone());
-                        return networkResponse;
+                    
+                    const respuestaParaCache = networkResponse.clone();
+
+                    
+                    caches.open(CACHE_DYNAMIC).then(cache => {
+                        cache.put(e.request, respuestaParaCache);
                     });
+
+                    return networkResponse;
                 })
                 .catch(() => {
-                    // Si falla la red (offline), buscamos la página en cualquier caché
                     return caches.match(e.request).then(cachedResponse => {
-                        // Si no la encuentra (ej. intentó entrar directo a una página no cacheada), 
-                        // lo mandamos al index.html para que la app no se rompa
                         return cachedResponse || caches.match('/index.html');
                     });
                 })
         );
-        return; 
+        return;
     }
 
-    // 3. CACHE FIRST para el resto (CSS, JS, Imágenes)
     e.respondWith(
-        caches.match(e.request).then((cachedResponse) => {
-            if (cachedResponse) return cachedResponse; // Devuelve desde caché si existe
+        caches.match(e.request).then(cachedResponse => {
+            if (cachedResponse) return cachedResponse;
             
-            // Si no está en caché, va a la red y lo guarda dinámicamente
-            return fetch(e.request).then((networkResponse) => {
+            return fetch(e.request).then(networkResponse => {
+                const respuestaParaCache = networkResponse.clone();
                 if ((e.request.url.startsWith('http://') || e.request.url.startsWith('https://')) && e.request.method === 'GET') {
-                    caches.open(CACHE_DYNAMIC).then((cache) => {
-                        cache.put(e.request, networkResponse.clone());
-                        limpiarCache(CACHE_DYNAMIC, 50);
+                    caches.open(CACHE_DYNAMIC).then(cache => {
+                        cache.put(e.request, respuestaParaCache);
                     });
                 }
                 return networkResponse;
@@ -150,27 +145,36 @@ self.addEventListener('notificationclose', (e) => {
     console.log('[SW] Notificación cerrada');
 });
 
+
 self.addEventListener('notificationclick', (e) => {
     console.log('[SW] Notificación clicada');
+    
     e.notification.close();
     
     const data = e.notification.data || {};
-    const baseUrl = data.url || '/mapa.html';
-    const targetUrl = data.idCenso
-        ? `${baseUrl}?idCenso=${encodeURIComponent(data.idCenso)}`
-        : baseUrl;
+    
+    const rutaDestino = data.idCenso
+        ? `/mascota-detalle.html?idCenso=${encodeURIComponent(data.idCenso)}`
+        : '/'; 
+
+    const urlToOpen = new URL(rutaDestino, self.location.origin).href;
+
+    console.log('[SW] Intentando abrir URL:', urlToOpen);
 
     e.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+            
             for (const client of clientList) {
-                if ('focus' in client) {
-                    return client.focus().then(() => client.navigate(targetUrl));
+                if (client.url === urlToOpen && 'focus' in client) {
+                    console.log('[SW] Pestaña encontrada, trayendo al frente...');
+                    return client.focus(); 
                 }
             }
+            
+            console.log('[SW] Abriendo nueva pestaña segura...');
             if (clients.openWindow) {
-                return clients.openWindow(targetUrl);
+                return clients.openWindow(urlToOpen);
             }
-            return null;
         })
     );
 });
